@@ -1,0 +1,6 @@
+{
+  "name": "CPOS - Your Remote Project Manager",
+  "description": "The ultimate platform for managing construction projects and hiring expert remote project managers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
