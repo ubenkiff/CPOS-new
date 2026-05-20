@@ -25,6 +25,24 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  const saved = localStorage.getItem('cpos-theme');
+                  // Since 'black' is default/dark, and 'white' is light
+                  const theme = saved || 'black';
+                  if (theme === 'white') {
+                    document.documentElement.classList.add('white-theme-loaded');
+                  }
+                } catch (e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
