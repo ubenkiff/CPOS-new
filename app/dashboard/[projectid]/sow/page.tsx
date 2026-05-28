@@ -6,6 +6,7 @@ import { canAccessProject, PUBLIC_VIEWONLY_PROJECT_ID } from '../../../../lib/ac
 import * as XLSX from 'xlsx'
 import { useTheme } from '../../../../lib/theme'
 import ThemeSelector from '../../../../components/ThemeSelector'
+import { parseXERToSow, parseMSPXmlToSow, parseCSVToSow, ParsedSowItem } from '../../../../lib/schedulerParser'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,169 @@ export default function SowPage() {
   const [activeSection, setActiveSection] = useState(0)
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg] = useState('')
+
+  // ── Primavera & MS Project integration state hooks ────────────────────────
+  const [showIntegration, setShowIntegration] = useState(false)
+  const [integrationFile, setIntegrationFile] = useState<File | null>(null)
+  const [integrationMode, setIntegrationMode] = useState<'auto' | 'xer' | 'msp' | 'csv'>('auto')
+  const [parsedItems, setParsedItems] = useState<ParsedSowItem[]>([])
+  const [integrationError, setIntegrationError] = useState('')
+  const [integrationLogs, setIntegrationLogs] = useState<string[]>([])
+
+  function getRowHeaders(ws: XLSX.WorkSheet, rowIndex: number, range: XLSX.Range): Set<string> {
+    const headers = new Set<string>()
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const addr = XLSX.utils.encode_cell({ r: rowIndex, c })
+      const cell = ws[addr]
+      const v = cell?.v
+      if (typeof v === 'string') {
+        const s = v.trim()
+        if (s) headers.add(s)
+      }
+    }
+    return headers
+  }
+
+  async function handleFileSelected(file: File) {
+    setIntegrationFile(file)
+    setIntegrationError('')
+    const logs = [`Loading file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)...`]
+    setIntegrationLogs(logs)
+    setParsedItems([])
+
+    try {
+      const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
+      
+      let mode = integrationMode
+      if (mode === 'auto') {
+        if (extension === '.xer') mode = 'xer'
+        else if (extension === '.xml') mode = 'msp'
+        else if (extension === '.csv' || extension === '.xlsx' || extension === '.xlsm' || extension === '.xls') mode = 'csv'
+        else {
+          throw new Error('Unsupported file extension. Please select .xer, .xml, .csv, or .xlsx')
+        }
+        logs.push(`Auto-detected format: ${mode.toUpperCase()}`)
+      }
+
+      if (mode === 'xer') {
+        const text = await file.text()
+        logs.push('Parsing Primavera P6 XER table records...')
+        const res = parseXERToSow(text)
+        logs.push(`Successfully parsed ${res.length} hierarchical and activity lines!`)
+        setParsedItems(res)
+      } else if (mode === 'msp') {
+        const text = await file.text()
+        logs.push('Parsing Microsoft Project XML hierarchy schema...')
+        const res = parseMSPXmlToSow(text)
+        logs.push(`Successfully parsed ${res.length} scheduled activity entries!`)
+        setParsedItems(res)
+      } else {
+        logs.push('Reading spreadsheet file contents...')
+        if (extension === '.csv') {
+          const text = await file.text()
+          const wb = XLSX.read(text, { type: 'string' })
+          const wsName = wb.SheetNames[0]
+          const ws = wb.Sheets[wsName]
+          const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' })
+          logs.push(`Read ${rows.length} records. Extracting schema...`)
+          
+          const headerSet = new Set(Object.keys(rows[0] || {}))
+          const res = parseCSVToSow(rows, headerSet)
+          logs.push(`Successfully mapped ${res.length} SOW activity blocks!`)
+          setParsedItems(res)
+        } else {
+          const ab = await file.arrayBuffer()
+          const wb = XLSX.read(ab, { type: 'array' })
+          const sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === 'master sow') || wb.SheetNames[0]
+          logs.push(`Loading worksheet: "${sheetName}"`)
+          const ws = wb.Sheets[sheetName]
+          
+          let rangeStart = 0
+          let headers: string[] = []
+          
+          const ref = ws['!ref']
+          if (ref) {
+            const decRange = XLSX.utils.decode_range(ref)
+            const row0Headers = getRowHeaders(ws, 0, decRange)
+            const row3Headers = getRowHeaders(ws, 3, decRange)
+            if (row3Headers.has('SOW #') || row3Headers.has('Serial')) {
+              rangeStart = 3
+              headers = Array.from(row3Headers)
+              logs.push('Auto-detected starting headers on Row 4.')
+            } else {
+              headers = Array.from(row0Headers)
+              logs.push('Auto-detected starting headers on Row 1.')
+            }
+          }
+          
+          const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+            range: rangeStart,
+            defval: '',
+          })
+          
+          const res = parseCSVToSow(rows, new Set(headers))
+          logs.push(`Successfully mapped ${res.length} hierarchical schedulers!`)
+          setParsedItems(res)
+        }
+      }
+      setIntegrationLogs([...logs])
+    } catch (e) {
+      setIntegrationError(e instanceof Error ? e.message : 'Error experienced parsing scheduling file.')
+      logs.push(`PARSER ERROR: ${e instanceof Error ? e.message : 'Error experienced parsing file.'}`)
+      setIntegrationLogs([...logs])
+    }
+  }
+
+  async function handleImportIntegration() {
+    if (parsedItems.length === 0) return
+    if (isPublicViewOnly) {
+      setIntegrationError('This is a public read-only demo project. Import is disabled.')
+      return
+    }
+    
+    setIntegrationError('')
+    setImporting(true)
+    setImportMsg('Deploying integration schedule to database...')
+    const logs = [...integrationLogs, 'Purging existing scheduling items...']
+    setIntegrationLogs(logs)
+
+    try {
+      const { error: delErr } = await supabase.from('sow_items').delete().eq('projectid', projectid)
+      if (delErr) throw new Error(delErr.message)
+
+      logs.push(`Writing ${parsedItems.length} parsed items to database...`)
+      setIntegrationLogs([...logs])
+      
+      const BATCH = 250
+      for (let i = 0; i < parsedItems.length; i += BATCH) {
+        const slice = parsedItems.slice(i, i + BATCH)
+        const payload = slice.map(item => ({
+          ...item,
+          projectid
+        }))
+        const { error: insErr } = await supabase.from('sow_items').insert(payload)
+        if (insErr) throw new Error(insErr.message)
+        
+        logs.push(`Wrote database entities ${Math.min(parsedItems.length, i + BATCH)} / ${parsedItems.length}...`)
+        setIntegrationLogs([...logs])
+      }
+
+      logs.push('Integration successfully deployed!')
+      setIntegrationLogs([...logs])
+      setImportMsg('')
+      setShowIntegration(false)
+      setParsedItems([])
+      setIntegrationFile(null)
+      await load()
+    } catch (e) {
+      setIntegrationError(e instanceof Error ? e.message : 'Database insertion failed.')
+      setImportMsg('')
+      logs.push(`DB ERROR: ${e instanceof Error ? e.message : 'Database insertion failed.'}`)
+      setIntegrationLogs([...logs])
+    } finally {
+      setImporting(false)
+    }
+  }
 
   // ── Derived form values ──────────────────────────────────────────────────
   const netQty    = (form.quantity || 0) * (1 + (form.waste_pct || 0) / 100)
@@ -632,15 +796,15 @@ export default function SowPage() {
             className="btn"
             onClick={() => {
               if (isPublicViewOnly) {
-                setError('This is a public read-only demo project. Import is disabled.')
+                setError('This is a public read-only demo project. Integration is disabled.')
                 return
               }
-              importInputRef.current?.click()
+              setShowIntegration(true)
             }}
             disabled={isPublicViewOnly || importing}
-            style={{ fontSize: '12px', opacity: isPublicViewOnly || importing ? 0.5 : 1, cursor: isPublicViewOnly || importing ? 'not-allowed' : 'pointer' }}
+            style={{ fontSize: '12px', opacity: isPublicViewOnly || importing ? 0.5 : 1, border: '1px solid #BA7517', color: '#BA7517', cursor: isPublicViewOnly || importing ? 'not-allowed' : 'pointer' }}
           >
-            {importing ? 'Importing...' : '↑ Import Template'}
+            📊 Scheduler Integration (P6 / MSP / CSV)
           </button>
           <button
             className="btn btn-primary"
@@ -1170,6 +1334,261 @@ export default function SowPage() {
       {/* Overlay when form is open */}
       {showForm && (
         <div onClick={closeForm} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 29 }} />
+      )}
+
+      {/* ── PRIMAVERA & MS PROJECT INTEGRATION CENTER MODAL ── */}
+      {showIntegration && (
+        <div className="fade-in" style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          {/* Backdrop */}
+          <div onClick={() => !importing && setShowIntegration(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(3px)' }} />
+          
+          {/* Modal Container */}
+          <div className="card" style={{ position: 'relative', width: '100%', maxWidth: 900, maxHeight: '90vh', background: isDark ? '#0d1117' : '#ffffff', border: '1px solid ' + (isDark ? '#21262d' : '#cbd5e1'), borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 1, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}>
+            
+            {/* Header */}
+            <div style={{ padding: '18px 24px', borderBottom: '1px solid ' + (isDark ? '#21262d' : '#cbd5e1'), display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <div>
+                <h3 style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 20, fontWeight: 700, color: hText, letterSpacing: '0.05em' }}>
+                  📊 PRIMAVERA & MS PROJECT INTEGRATION CENTER
+                </h3>
+                <p style={{ fontSize: 11, color: subText, marginTop: 4 }}>
+                  Natively ingest and parse industrial scheduler files to control CPOS Gantt, Cost, and Resource sheets.
+                </p>
+              </div>
+              <button 
+                className="btn" 
+                onClick={() => setShowIntegration(false)}
+                disabled={importing}
+                style={{ fontSize: 12, padding: '6px 12px' }}
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            {/* Scrollable Content */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+              
+              {/* File Selector & Settings */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(250px, 1fr) 1.5fr', gap: 18 }}>
+                
+                {/* File Dropzone */}
+                <div 
+                  style={{ 
+                    border: '2px dashed ' + (integrationFile ? '#f59e0b' : (isDark ? '#30363d' : '#cbd5e1')), 
+                    background: isDark ? '#0a0c0e' : '#f8fafc',
+                    borderRadius: 8, 
+                    padding: '24px 16px', 
+                    textAlign: 'center', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'border-color 0.2s',
+                  }}
+                  onClick={() => document.getElementById('integration-file-picker')?.click()}
+                >
+                  <span style={{ fontSize: 24, marginBottom: 8 }}>📁</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: textCol }}>
+                    {integrationFile ? integrationFile.name : 'Choose or Drop File'}
+                  </span>
+                  <span style={{ fontSize: 10, color: subText, marginTop: 6 }}>
+                    Supports Primavera P6 (.xer), MS Project (.xml), Excel (.xlsx), & standard CSV
+                  </span>
+                  
+                  <input 
+                    id="integration-file-picker"
+                    type="file"
+                    accept=".xer,.xml,.xlsx,.xlsm,.xls,.csv"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      if (f) handleFileSelected(f)
+                    }}
+                  />
+                </div>
+
+                {/* Import Type Configuration */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div className="form-label" style={{ fontWeight: 600, fontSize: 11, letterSpacing: '0.04em' }}>1. SELECT INGESTION INTERFACE</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {[
+                      { id: 'auto', label: '⚡ Auto-Detect File', desc: 'Auto-scrapes tables & layout' },
+                      { id: 'xer', label: '🌅 Primavera P6 (.xer)', desc: 'Tabbed native database records' },
+                      { id: 'msp', label: '📊 MS Project (.xml)', desc: 'Full xml outlining attributes' },
+                      { id: 'csv', label: '📄 SOW CSV / Excel', desc: 'Row header matches' },
+                    ].map(opt => (
+                      <label 
+                        key={opt.id}
+                        style={{ 
+                          border: '1px solid ' + (integrationMode === opt.id ? '#f59e0b' : (isDark ? '#21262d' : '#e2e8f0')),
+                          background: integrationMode === opt.id ? (isDark ? '#1a1510' : '#fff9f0') : (isDark ? '#0d1117' : '#ffffff'),
+                          borderRadius: 6,
+                          padding: '10px 12px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                          transition: 'all 0.15s'
+                        }}
+                        onClick={() => {
+                          setIntegrationMode(opt.id as any)
+                          if (integrationFile) {
+                            setTimeout(() => {
+                              void handleFileSelected(integrationFile)
+                            }, 50)
+                          }
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: integrationMode === opt.id ? '#f59e0b' : textCol }}>
+                          <input 
+                            type="radio" 
+                            name="int-mode" 
+                            checked={integrationMode === opt.id} 
+                            onChange={() => {}}
+                            style={{ accentColor: '#f59e0b' }}
+                          />
+                          {opt.label}
+                        </div>
+                        <span style={{ fontSize: 9, color: subText, marginLeft: 18 }}>{opt.desc}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Terminal Logs Block */}
+              {integrationLogs.length > 0 && (
+                <div style={{ background: '#07090e', border: '1px solid #161b22', borderRadius: 6, padding: '12px 16px', fontFamily: "'DM Mono', monospace" }}>
+                  <div style={{ fontSize: 9, color: '#484f58', borderBottom: '1px solid #161b22', paddingBottom: 6, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>🖥️ PARSE LOGS & INTEGRITY DIAGNOSTICS</span>
+                    <span style={{ color: '#4ade80' }}>● ACTIVE</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 110, overflowY: 'auto', fontSize: 11, color: '#c9d1d9' }}>
+                    {integrationLogs.map((log, idx) => (
+                      <div key={idx} style={{ display: 'flex', gap: 8 }}>
+                        <span style={{ color: '#484f58' }}>[{idx + 1}]</span>
+                        <span style={{ color: log.startsWith('PARSER ERROR') || log.startsWith('DB ERROR') ? '#f87171' : (log.startsWith('Successfully') || log.includes('deployed') ? '#4ade80' : '#c9d1d9') }}>{log}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Error Alert Box */}
+              {integrationError && (
+                <div style={{ color: '#f87171', background: isDark ? '#2d0f0f' : '#fee2e2', border: '1px solid transparent', borderRadius: 6, padding: '12px 16px', fontSize: 11 }}>
+                  <strong>⚠️ Parse Error Alert:</strong> {integrationError}
+                </div>
+              )}
+
+              {/* Parsed Items Preview Grid */}
+              {parsedItems.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="form-label" style={{ fontWeight: 600, fontSize: 11, letterSpacing: '0.04em' }}>
+                      2. SOW SCHEDULE MERGE PREVIEW ({parsedItems.length} lines detected)
+                    </span>
+                    <span style={{ fontSize: 10, color: '#4ade80' }}>✔ Structured Hierarchy & Dates Checked</span>
+                  </div>
+
+                  <div style={{ border: '1px solid ' + (isDark ? '#21262d' : '#cbd5e1'), borderRadius: 8, maxHeight: 220, overflowY: 'auto', background: isDark ? '#0d1117' : '#ffffff' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 11 }}>
+                      <thead style={{ background: isDark ? '#161b22' : '#f8fafc', borderBottom: '1px solid ' + (isDark ? '#21262d' : '#cbd5e1'), position: 'sticky', top: 0, zIndex: 1, color: hText }}>
+                        <tr>
+                          <th style={{ padding: '8px 12px' }}>SOW #</th>
+                          <th style={{ padding: '8px 12px' }}>Scope Detail / Task Item</th>
+                          <th style={{ padding: '8px 12px' }}>Dates (Planned)</th>
+                          <th style={{ padding: '8px 12px' }}>Days</th>
+                          <th style={{ padding: '8px 12px' }}>% Done</th>
+                          <th style={{ padding: '8px 12px' }}>Primary Dep.</th>
+                          <th style={{ padding: '8px 12px' }}>CP</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {parsedItems.map((item, index) => {
+                          const isHeader = item.hierarchy_level < 3
+                          const textIndent = (item.hierarchy_level - 1) * 16
+                          return (
+                            <tr 
+                              key={index} 
+                              style={{ 
+                                borderBottom: '1px solid ' + (isDark ? '#161b22' : '#f1f5f9'),
+                                background: isHeader ? (isDark ? '#161b2255' : '#f8fafc') : 'transparent',
+                                color: isHeader ? '#f59e0b' : textCol,
+                                fontWeight: isHeader ? 600 : 'normal'
+                              }}
+                            >
+                              <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: isHeader ? '#f59e0b' : subText }}>
+                                {item.sow_number}
+                              </td>
+                              <td style={{ padding: '8px 12px', paddingLeft: 12 + textIndent }}>
+                                {item.hierarchy_level === 1 ? item.scope_l1 : item.hierarchy_level === 2 ? item.item_l2 : item.sub_item_l3}
+                              </td>
+                              <td style={{ padding: '8px 12px', color: subText }}>
+                                {item.planned_start ? `${item.planned_start} to ${item.planned_end}` : '—'}
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>
+                                {item.planned_days ? `${item.planned_days} d` : '—'}
+                              </td>
+                              <td style={{ padding: '8px 12px', color: item.percent_complete === 100 ? '#4ade80' : textCol }}>
+                                {item.percent_complete ?? 0}%
+                              </td>
+                              <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#60a5fa' }}>
+                                {item.dep_on ? `${item.dep_on} (${item.dep_type})` : '—'}
+                              </td>
+                              <td style={{ padding: '8px 12px', color: item.is_critical_path ? '#f87171' : subText }}>
+                                {item.is_critical_path ? '🚩 YES' : '—'}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ background: isDark ? '#1a1010' : '#fef2f2', border: '1px solid ' + (isDark ? '#2d1515' : '#fecaca'), padding: '12px 16px', borderRadius: 8, display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <span style={{ fontSize: 18 }}>⚠️</span>
+                    <div style={{ fontSize: 10, color: isDark ? '#f87171' : '#991b1b', lineHeight: '1.4' }}>
+                      <strong>Critical Sync Alert:</strong> Harmonizing will release all existing items on scope structures, cost estimates, BOQ values, and current Gantt charts for this project ID in your persistent database. Use with precision.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer Buttons */}
+            <div style={{ padding: '14px 24px', borderTop: '1px solid ' + (isDark ? '#21262d' : '#cbd5e1'), display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', background: isDark ? '#0a0c0e' : '#f8fafc' }}>
+              <span style={{ fontSize: 10, color: subText }}>
+                {parsedItems.length > 0 ? `✔ ${parsedItems.length} elements mapped` : 'Please upload a scheduling file to proceed'}
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button 
+                  className="btn" 
+                  onClick={() => {
+                    setShowIntegration(false)
+                    setParsedItems([])
+                    setIntegrationFile(null)
+                  }}
+                  disabled={importing}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className="btn btn-primary"
+                  style={{ background: '#f59e0b', borderColor: '#f59e0b', fontWeight: 700 }}
+                  onClick={handleImportIntegration}
+                  disabled={parsedItems.length === 0 || importing}
+                >
+                  {importing ? 'Processing sync...' : '🚀 Synchronize Schedule & Overwrite SOW'}
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
       )}
     </div>
   )

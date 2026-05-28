@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useTheme } from '../../../lib/theme'
+import ThemeSelector from '../../../components/ThemeSelector'
 
 type Project = {
   projectid: string
@@ -15,17 +17,18 @@ type Project = {
   currency: string
 }
 
-const statusColors: Record<string, { bg: string; text: string }> = {
-  Active: { bg: '#052e16', text: '#4ade80' },
-  Planning: { bg: '#1e1b4b', text: '#818cf8' },
-  'On Hold': { bg: '#2d1f05', text: '#f59e0b' },
-  Closed: { bg: '#1c1917', text: '#78716c' },
+const statusColors: Record<string, { bg: string; text: string; bgLight: string; textLight: string }> = {
+  Active: { bg: '#052e16', text: '#4ade80', bgLight: '#d1fae5', textLight: '#065f46' },
+  Planning: { bg: '#1e1b4b', text: '#818cf8', bgLight: '#e0e7ff', textLight: '#3730a3' },
+  'On Hold': { bg: '#2d1f05', text: '#f59e0b', bgLight: '#fef3c7', textLight: '#92400e' },
+  Closed: { bg: '#1c1917', text: '#78716c', bgLight: '#f5f5f4', textLight: '#57534e' },
 }
 
 const PUBLIC_VIEWONLY_PROJECT_ID = 'e03418fd-0ef2-4080-90c6-f18009bb12d1'
 
 export default function DemoBrowsePage() {
   const router = useRouter()
+  const { theme, setTheme, isDark } = useTheme()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [hint, setHint] = useState<string | null>(null)
@@ -50,32 +53,44 @@ export default function DemoBrowsePage() {
     }
   }, [])
 
+  // Theme variable bindings
+  const bg = isDark ? '#0a0c0e' : '#f8fafc'
+  const textCol = isDark ? '#c9d1d9' : '#1e293b'
+  const borderCol = isDark ? '#21262d' : '#cbd5e1'
+  const cardBg = isDark ? '#0d1117' : '#ffffff'
+  const hText = isDark ? '#e6edf3' : '#0f172a'
+  const subText = isDark ? '#8b949e' : '#57606a'
+  const minText = isDark ? '#484f58' : '#8c95a0'
+  const bgLines = isDark
+    ? 'linear-gradient(rgba(96,165,250,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(96,165,250,0.025) 1px, transparent 1px)'
+    : 'linear-gradient(rgba(148,163,184,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.035) 1px, transparent 1px)'
+
   return (
     <div
       style={{
         fontFamily: "'DM Mono', 'Courier New', monospace",
-        background: '#0a0c0e',
+        background: bg,
         minHeight: '100vh',
         padding: '40px',
-        color: '#c9d1d9',
-        backgroundImage:
-          'linear-gradient(rgba(96,165,250,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(96,165,250,0.025) 1px, transparent 1px)',
+        color: textCol,
+        backgroundImage: bgLines,
         backgroundSize: '32px 32px',
+        transition: 'all 0.3s ease',
       }}
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         .project-card {
-          background: #0d1117; border: 1px solid #21262d; border-radius: 10px;
+          background: ${cardBg}; border: 1px solid ${borderCol}; border-radius: 10px;
           padding: 22px; cursor: pointer; transition: all 0.2s;
         }
         .project-card:hover {
           border-color: #f59e0b; transform: translateY(-2px);
-          box-shadow: 0 8px 24px rgba(245,158,11,0.08);
+          box-shadow: ${isDark ? '0 8px 24px rgba(245,158,11,0.08)' : '0 8px 24px rgba(245,158,11,0.06)'};
         }
         .tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-        .btn-outline { background: transparent; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; padding: 8px 14px; font-weight: 600; cursor: pointer; font-family: inherit; font-size: 12px; }
+        .btn-outline { background: transparent; border: 1px solid ${isDark ? '#30363d' : '#cbd5e1'}; border-radius: 6px; color: ${isDark ? '#8b949e' : '#24292f'}; padding: 8px 14px; font-weight: 600; cursor: pointer; font-family: inherit; font-size: 12px; }
         .btn-outline:hover { border-color: #f59e0b; color: #f59e0b; }
       `}</style>
 
@@ -111,7 +126,7 @@ export default function DemoBrowsePage() {
                 fontFamily: "'Barlow Condensed', sans-serif",
                 fontWeight: 800,
                 fontSize: 20,
-                color: '#e6edf3',
+                color: hText,
                 letterSpacing: '0.06em',
               }}
             >
@@ -123,17 +138,18 @@ export default function DemoBrowsePage() {
               fontFamily: "'Barlow Condensed', sans-serif",
               fontWeight: 700,
               fontSize: 26,
-              color: '#e6edf3',
+              color: hText,
               letterSpacing: '0.02em',
             }}
           >
             SAMPLE PROJECTS
           </h1>
-          <p style={{ color: '#484f58', fontSize: 12, marginTop: 6, maxWidth: 520 }}>
+          <p style={{ color: subText, fontSize: 12, marginTop: 6, maxWidth: 520 }}>
             Live data from your database — browse without signing in. Sign in to open a project and edit.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <ThemeSelector compact={true} />
           <button type="button" className="btn-outline" onClick={() => router.push('/login')}>
             Sign in
           </button>
@@ -150,13 +166,14 @@ export default function DemoBrowsePage() {
 
       <div
         style={{
-          background: '#0d1117',
-          border: '1px solid #21262d',
+          background: isDark ? '#0d1117' : '#ffffff',
+          border: '1px solid ' + borderCol,
           borderRadius: 8,
           padding: '14px 18px',
           marginBottom: 28,
           fontSize: 12,
-          color: '#8b949e',
+          color: subText,
+          transition: 'all 0.3s ease',
         }}
       >
         <span style={{ color: '#f59e0b', fontWeight: 600 }}>Tip:</span> Click a project, then sign in — you’ll be sent back to that project after login.
@@ -164,33 +181,34 @@ export default function DemoBrowsePage() {
 
       <div
         style={{
-          background: '#0d1117',
-          border: '1px solid #21262d',
+          background: isDark ? '#0d1117' : '#ffffff',
+          border: '1px solid ' + borderCol,
           borderRadius: 8,
           padding: '14px 18px',
           marginBottom: 28,
           fontSize: 12,
-          color: '#8b949e',
+          color: subText,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 16,
           flexWrap: 'wrap',
+          transition: 'all 0.3s ease',
         }}
       >
         <div>
-          <div style={{ fontSize: 10, color: '#484f58', letterSpacing: '0.08em', fontWeight: 800, marginBottom: 6 }}>
+          <div style={{ fontSize: 10, color: minText, letterSpacing: '0.08em', fontWeight: 800, marginBottom: 6 }}>
             INVESTOR BRIEFING
           </div>
-          <div style={{ color: '#c9d1d9', fontSize: 12, lineHeight: 1.6 }}>
+          <div style={{ color: textCol, fontSize: 12, lineHeight: 1.6 }}>
             Want the full CPOS story — modules, costs, revenue model, and roadmap?
           </div>
         </div>
         <Link
           href="/pitch"
           style={{
-            background: '#161b22',
-            border: '1px solid #30363d',
+            background: isDark ? '#161b22' : '#f1f5f9',
+            border: '1px solid ' + (isDark ? '#30363d' : '#cbd5e1'),
             borderRadius: 6,
             color: '#f59e0b',
             padding: '8px 14px',
@@ -198,6 +216,7 @@ export default function DemoBrowsePage() {
             fontSize: 12,
             textDecoration: 'none',
             letterSpacing: '0.04em',
+            transition: 'all 0.3s ease',
           }}
         >
           View Pitch →
@@ -205,7 +224,7 @@ export default function DemoBrowsePage() {
       </div>
 
       {loading && (
-        <div style={{ textAlign: 'center', padding: '60px', color: '#484f58', fontSize: 13 }}>
+        <div style={{ textAlign: 'center', padding: '60px', color: minText, fontSize: 13 }}>
           Loading projects…
         </div>
       )}
@@ -213,12 +232,12 @@ export default function DemoBrowsePage() {
       {!loading && hint && projects.length === 0 && (
         <div
           style={{
-            background: '#1a1508',
+            background: isDark ? '#1a1508' : '#fffbeb',
             border: '1px solid #f59e0b33',
             borderRadius: 8,
             padding: 20,
             fontSize: 13,
-            color: '#c9d1d9',
+            color: textCol,
             marginBottom: 24,
           }}
         >
@@ -227,7 +246,7 @@ export default function DemoBrowsePage() {
       )}
 
       {!loading && projects.length === 0 && !hint && (
-        <div style={{ textAlign: 'center', padding: '60px', color: '#484f58' }}>
+        <div style={{ textAlign: 'center', padding: '60px', color: minText }}>
           <p style={{ marginBottom: 12 }}>No projects found in the database yet.</p>
           <Link href="/register" style={{ color: '#f59e0b', fontSize: 13 }}>
             Create an account →
@@ -246,6 +265,8 @@ export default function DemoBrowsePage() {
           const sc = statusColors[project.status] || statusColors['Planning']
           const next = `/dashboard/${project.projectid}`
           const isPublicSolar = project.projectid === PUBLIC_VIEWONLY_PROJECT_ID
+          const tagBg = isDark ? sc.bg : sc.bgLight
+          const tagTxt = isDark ? sc.text : sc.textLight
           return (
             <div
               key={project.projectid}
@@ -254,7 +275,10 @@ export default function DemoBrowsePage() {
               tabIndex={0}
               style={
                 isPublicSolar
-                  ? { borderColor: '#f59e0b66', background: '#1a120a' }
+                  ? { 
+                      borderColor: '#f59e0b66', 
+                      background: isDark ? '#1a120a' : '#fffbeb' 
+                    }
                   : undefined
               }
               onClick={() => {
@@ -287,7 +311,7 @@ export default function DemoBrowsePage() {
                 >
                   {project.project_code}
                 </span>
-                <div className="tag" style={{ background: sc.bg, color: sc.text }}>
+                <div className="tag" style={{ background: tagBg, color: tagTxt }}>
                   {project.status}
                 </div>
               </div>
@@ -296,7 +320,7 @@ export default function DemoBrowsePage() {
                   fontFamily: "'Barlow Condensed', sans-serif",
                   fontWeight: 700,
                   fontSize: 17,
-                  color: '#e6edf3',
+                  color: hText,
                   marginBottom: 12,
                   lineHeight: 1.3,
                 }}
@@ -305,7 +329,7 @@ export default function DemoBrowsePage() {
               </h2>
               <div
                 style={{
-                  borderTop: '1px solid #161b22',
+                  borderTop: '1px solid ' + (isDark ? '#161b22' : '#f1f5f9'),
                   paddingTop: 12,
                   display: 'flex',
                   flexDirection: 'column',
@@ -313,15 +337,15 @@ export default function DemoBrowsePage() {
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 10, color: '#484f58', letterSpacing: '0.06em' }}>CLIENT</span>
-                  <span style={{ fontSize: 11, color: '#c9d1d9' }}>{project.client_name || '—'}</span>
+                  <span style={{ fontSize: 10, color: minText, letterSpacing: '0.06em' }}>CLIENT</span>
+                  <span style={{ fontSize: 11, color: textCol }}>{project.client_name || '—'}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 10, color: '#484f58', letterSpacing: '0.06em' }}>LOCATION</span>
-                  <span style={{ fontSize: 11, color: '#c9d1d9' }}>{project.location || '—'}</span>
+                  <span style={{ fontSize: 10, color: minText, letterSpacing: '0.06em' }}>LOCATION</span>
+                  <span style={{ fontSize: 11, color: textCol }}>{project.location || '—'}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 10, color: '#484f58', letterSpacing: '0.06em' }}>BUDGET</span>
+                  <span style={{ fontSize: 10, color: minText, letterSpacing: '0.06em' }}>BUDGET</span>
                   <span style={{ fontSize: 11, color: '#4ade80', fontWeight: 500 }}>
                     {project.currency} {Number(project.budget).toLocaleString()}
                   </span>
@@ -347,11 +371,11 @@ export default function DemoBrowsePage() {
         style={{
           marginTop: 36,
           paddingTop: 16,
-          borderTop: '1px solid #21262d',
+          borderTop: '1px solid ' + borderCol,
           textAlign: 'center',
         }}
       >
-        <Link href="/login" style={{ fontSize: 12, color: '#6e7681' }}>
+        <Link href="/login" style={{ fontSize: 12, color: subText }}>
           ← Back to sign in
         </Link>
       </div>

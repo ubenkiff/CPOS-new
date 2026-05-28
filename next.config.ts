@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
         port: '',
         pathname: '/**',
       },
+      {
+        protocol: 'https',
+        hostname: 'uddicpos-wynhi.wordpress.com',
+        port: '',
+        pathname: '/**',
+      },
     ],
   },
 };

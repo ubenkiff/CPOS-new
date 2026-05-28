@@ -7,7 +7,7 @@ import Link from "next/link";
 import { 
   ArrowRight, Shield, Sparkles, Globe, Wifi, WifiOff, FileText, 
   X, ExternalLink, Database, BookOpen, Terminal, Settings, 
-  AlertCircle, CheckCircle2 
+  AlertCircle, CheckCircle2, ChevronLeft, ChevronRight 
 } from "lucide-react";
 import { FALLBACK_POSTS, WPPost, WordPressConnectionStatus, getCategoryBadgeStyles } from "../lib/wordpress";
 
@@ -43,6 +43,29 @@ export default function Home() {
     }
     getWordPressData();
   }, []);
+
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [isAutoplayPaused, setIsAutoplayPaused] = useState(false);
+
+  // Autoplay hero slides
+  useEffect(() => {
+    if (isAutoplayPaused || posts.length <= 1) return;
+    const interval = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % posts.length);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [posts.length, isAutoplayPaused]);
+
+  const safeCurrentSlide = posts.length > 0 ? currentSlide % posts.length : 0;
+  const activePost = posts[safeCurrentSlide] || FALLBACK_POSTS[0];
+
+  // Helper to get image for active slide: default fallback post 0 uses the "chaps at site" image!
+  const getSlideImage = (post: WPPost, index: number) => {
+    if (index === 0 && post.id === 991) {
+      return "https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&q=80&w=1080";
+    }
+    return post.image || "https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&q=80&w=1080";
+  };
 
   const fadeInUp = {
     hidden: { opacity: 0, y: 30 },
@@ -147,23 +170,104 @@ export default function Home() {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8 }}
             className="relative h-[600px] lg:h-[700px] w-full"
+            onMouseEnter={() => setIsAutoplayPaused(true)}
+            onMouseLeave={() => setIsAutoplayPaused(false)}
           >
-            <div 
-              className="absolute inset-x-0 bottom-0 top-10 bg-slate-100 rounded-t-[40px] overflow-hidden shadow-inner cursor-pointer group"
-              onClick={() => setSelectedPost(posts[layout.heroIndex] || posts[0] || FALLBACK_POSTS[0])}
-            >
-               <Image 
-                src="https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&q=80&w=1080" 
-                alt="Construction Engineering Site"
-                fill
-                className="object-cover group-hover:scale-[1.03] transition-transform duration-700"
-                referrerPolicy="no-referrer"
-               />
-               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-8">
-                 <span className="text-white text-xs font-black uppercase tracking-widest bg-orange-500 px-4 py-2 rounded shadow-lg shadow-orange-500/10">
-                   view latest cpos insight
-                 </span>
-               </div>
+            <div className="absolute inset-x-0 bottom-0 top-10 bg-slate-100 rounded-t-[40px] overflow-hidden shadow-2xl">
+              <div className="w-full h-full relative group">
+                {/* Slides Container using AnimatePresence for elegant cross-fade */}
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={safeCurrentSlide}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="absolute inset-0 w-full h-full cursor-pointer"
+                    onClick={() => setSelectedPost(activePost)}
+                  >
+                    <Image 
+                      src={getSlideImage(activePost, safeCurrentSlide)} 
+                      alt={activePost.title}
+                      fill
+                      className="object-cover group-hover:scale-[1.02] transition-transform duration-700"
+                      referrerPolicy="no-referrer"
+                    />
+                    
+                    {/* Backdrop Gradient for Premium Visual Contrast */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-black/20" />
+                    
+                    {/* Floating Content Overlays */}
+                    <div className="absolute inset-x-0 bottom-0 p-8 md:p-12 flex flex-col items-start gap-4 text-left">
+                      <span className="inline-block text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded bg-orange-500 text-white shadow-xl">
+                        {activePost.category || "Featured Insight"}
+                      </span>
+                      
+                      <h2 className="text-3xl md:text-4xl font-black text-white leading-tight tracking-tight lowercase max-w-xl">
+                        {activePost.title}
+                      </h2>
+                      
+                      <p className="text-slate-300 font-medium text-sm leading-relaxed max-w-lg line-clamp-2">
+                        {activePost.excerpt}
+                      </p>
+                      
+                      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-orange-400 mt-2 hover:text-orange-300 transition-colors">
+                        <span>Read Insight Narrative</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </div>
+                    </div>
+                  </motion.div>
+                </AnimatePresence>
+
+                {/* Slider Arrows */}
+                {posts.length > 1 && (
+                  <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCurrentSlide((prev) => (prev - 1 + posts.length) % posts.length);
+                      }}
+                      className="absolute left-6 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center border border-white/15 z-20 backdrop-blur-sm cursor-pointer hover:scale-105 active:scale-95 transition-all text-center"
+                      title="Previous Slide"
+                      aria-label="Previous Slide"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCurrentSlide((prev) => (prev + 1) % posts.length);
+                      }}
+                      className="absolute right-6 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center border border-white/15 z-20 backdrop-blur-sm cursor-pointer hover:scale-105 active:scale-95 transition-all text-center"
+                      title="Next Slide"
+                      aria-label="Next Slide"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </>
+                )}
+
+                {/* Dots Indicators */}
+                {posts.length > 1 && (
+                  <div className="absolute bottom-6 right-8 flex gap-2 z-20">
+                    {posts.map((_, idx) => (
+                      <button
+                        key={idx}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentSlide(idx);
+                        }}
+                        className={`h-2 rounded-full cursor-pointer transition-all ${
+                          idx === safeCurrentSlide 
+                            ? "bg-orange-500 w-6" 
+                            : "bg-white/40 hover:bg-white/70 w-2"
+                        }`}
+                        title={`Go to slide ${idx + 1}`}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </motion.div>
         </div>
