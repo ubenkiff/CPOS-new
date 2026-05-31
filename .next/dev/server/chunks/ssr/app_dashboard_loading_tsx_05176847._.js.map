@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/Uddi/CPOS-new/app/dashboard/loading.tsx"],"sourcesContent":["export default function Loading() {\r\n  return (\r\n    <div\r\n      style={{\r\n        minHeight: '100vh',\r\n        background: '#0a0a0a',\r\n        display: 'flex',\r\n        alignItems: 'center',\r\n        justifyContent: 'center',\r\n        color: '#f59e0b',\r\n        fontFamily: 'monospace',\r\n        fontSize: '14px',\r\n        letterSpacing: '2px',\r\n      }}\r\n    >\r\n      LOADING...\r\n    </div>\r\n  )\r\n}\r\n"],"names":[],"mappings":";;;;;;AAAe,SAAS;IACtB,qBACE,8OAAC;QACC,OAAO;YACL,WAAW;YACX,YAAY;YACZ,SAAS;YACT,YAAY;YACZ,gBAAgB;YAChB,OAAO;YACP,YAAY;YACZ,UAAU;YACV,eAAe;QACjB;kBACD;;;;;;AAIL"}}]
-}
