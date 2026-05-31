@@ -115,6 +115,7 @@ export default function ProjectDetail() {
   const [templateImporting, setTemplateImporting] = useState(false)
   const [templateImportMsg, setTemplateImportMsg] = useState('')
   const [templateImportError, setTemplateImportError] = useState('')
+  const [templateDownloading, setTemplateDownloading] = useState(false)
 
   useEffect(() => {
     if (!projectid) return
@@ -206,6 +207,314 @@ export default function ProjectDetail() {
     setShowCostForm(false)
     setSavingCost(false)
     fetchAll()
+  }
+
+  // Excel template upload functions
+  function parseExcelDate(v: unknown): string | undefined {
+    if (v === null || v === undefined || v === '') return undefined
+    if (typeof v === 'string') {
+      const trimmed = v.trim()
+      if (!trimmed) return undefined
+      const d = new Date(trimmed)
+      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]
+      return undefined
+    }
+    if (typeof v === 'number') {
+      const d = XLSX.SSF.parse_date_code(v)
+      if (!d) return undefined
+      const dt = new Date(Date.UTC(d.y, d.m - 1, d.d))
+      return dt.toISOString().split('T')[0]
+    }
+    return undefined
+  }
+
+  function num(v: unknown): number | undefined {
+    if (v === null || v === undefined || v === '') return undefined
+    const n = typeof v === 'number' ? v : Number(String(v).replace(/,/g, ''))
+    return Number.isFinite(n) ? n : undefined
+  }
+
+  function pct(v: unknown): number | undefined {
+    const n = num(typeof v === 'string' ? v.replace(/%/g, '') : v)
+    if (n === undefined) return undefined
+    const normalized = n > 0 && n <= 1 ? n * 100 : n
+    return Math.max(0, Math.min(100, normalized))
+  }
+
+  function pick(r: Record<string, unknown>, keys: string[]): unknown {
+    for (const k of keys) {
+      const v = r[k]
+      if (v !== undefined && v !== null && v !== '') return v
+    }
+    return undefined
+  }
+
+  function getHeaderSet(ws: XLSX.WorkSheet): Set<string> {
+    const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null
+    const headers = new Set<string>()
+    if (!range) return headers
+
+    const headerRow = 3
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const addr = XLSX.utils.encode_cell({ r: headerRow, c })
+      const cell = (ws as any)[addr]
+      const v = cell?.v
+      if (typeof v === 'string') {
+        const s = v.trim()
+        if (s) headers.add(s)
+      }
+    }
+    return headers
+  }
+
+  function resolveHeader(headers: Set<string>, keys: string[]): string | undefined {
+    return keys.find(k => headers.has(k))
+  }
+
+  function validateTemplateHeaders(headers: Set<string>): string[] {
+    const missing: string[] = []
+
+    const requiredGroups: Array<{ label: string; keys: string[] }> = [
+      { label: 'SOW number (Serial / SOW #)', keys: ['Serial', 'SOW #'] },
+      { label: 'Scope (Scope / Scope (L1))', keys: ['Scope', 'Scope (L1)'] },
+      { label: 'Item (Item / Item (L2))', keys: ['Item', 'Item (L2)'] },
+      { label: 'Sub Item (Sub Item / Sub Item (L3))', keys: ['Sub Item', 'Sub Item (L3)'] },
+    ]
+
+    for (const g of requiredGroups) {
+      if (!resolveHeader(headers, g.keys)) missing.push(g.label)
+    }
+
+    return missing
+  }
+
+  function mapSowStatusToTaskStatus(sowStatus: string): string {
+    const s = sowStatus.toLowerCase()
+    if (s.includes('complet')) return 'Done'
+    if (s.includes('progress')) return 'In Progress'
+    if (s.includes('delay') || s.includes('blocked') || s.includes('waiting')) return 'Blocked'
+    return 'Open'
+  }
+
+  function normalizeSowStatus(raw: unknown): string {
+    const s = String(raw ?? '').trim()
+    if (!s) return 'Not Started'
+    const v = s.toLowerCase()
+    if (v === 'complete' || v === 'completed' || v === 'done' || v === 'finished') return 'Complete'
+    if (v.includes('progress') || v === 'started' || v === 'ongoing') return 'In Progress'
+    if (v.includes('hold') || v.includes('paused')) return 'On Hold'
+    if (v.includes('delay') || v.includes('behind') || v.includes('late') || v.includes('overdue') || v.includes('block') || v.includes('waiting')) return 'Delayed'
+    if (v.includes('not started') || v === 'open' || v === 'todo' || v === 'new') return 'Not Started'
+    const allowed = ['Not Started', 'In Progress', 'Complete', 'On Hold', 'Delayed']
+    return allowed.find(opt => opt.toLowerCase() === v) ?? 'Not Started'
+  }
+
+  function normalizeRisk(raw: unknown): string | undefined {
+    const s = String(raw ?? '').trim()
+    if (!s) return undefined
+    const v = s.toLowerCase()
+    if (v.startsWith('low')) return 'Low'
+    if (v.startsWith('med')) return 'Medium'
+    if (v.startsWith('high')) return 'High'
+    if (v.startsWith('crit')) return 'Critical'
+    const allowed = ['Low', 'Medium', 'High', 'Critical']
+    return allowed.find(opt => opt.toLowerCase() === v) ?? undefined
+  }
+
+  function normalizeDepType(raw: unknown): string {
+    const s = String(raw ?? '').trim()
+    if (!s) return 'FS'
+    const v = s.toUpperCase()
+    return ['FS', 'SF', 'SS', 'FF'].includes(v) ? v : 'FS'
+  }
+
+  async function handleUploadMasterTemplate(file: File) {
+    if (isPublicSolar) {
+      setTemplateImportError('This is a public read-only demo project. Upload is disabled.')
+      return
+    }
+    setTemplateImportError('')
+    setTemplateImportMsg('Reading Excel...')
+    setTemplateImporting(true)
+
+    try {
+      const ab = await file.arrayBuffer()
+      const wb = XLSX.read(ab, { type: 'array' })
+      const sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === 'master sow')
+      if (!sheetName) throw new Error('Sheet "MASTER SOW" not found in the workbook.')
+
+      const ws = wb.Sheets[sheetName]
+
+      const headerSet = getHeaderSet(ws)
+      const missing = validateTemplateHeaders(headerSet)
+      if (missing.length) {
+        const found = Array.from(headerSet).slice(0, 40).join(', ')
+        throw new Error(`Template headers not recognized. Missing: ${missing.join(' | ')}. Found headers: ${found}`)
+      }
+
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+        range: 3,
+        defval: '',
+      })
+
+      const mapped = rows
+        .map((r) => {
+          const sowNumber = String(pick(r, ['Serial', 'SOW #']) ?? '').trim()
+          if (!sowNumber) return null
+          if (sowNumber.toUpperCase() === 'TOTALS') return null
+
+          const scope = String(pick(r, ['Scope', 'Scope (L1)']) ?? '').trim()
+          const item = String(pick(r, ['Item', 'Item (L2)']) ?? '').trim()
+          const subItem = String(pick(r, ['Sub Item', 'Sub Item (L3)']) ?? '').trim()
+          const particulars = String(pick(r, ['Particulars', 'Particulars / Spec']) ?? '').trim()
+
+          const hierarchyLevel = sowNumber.split('.').length as 1 | 2 | 3
+          const hl: 1 | 2 | 3 = hierarchyLevel >= 3 ? 3 : hierarchyLevel === 2 ? 2 : 1
+
+          const plannedStart = parseExcelDate(pick(r, ['Planned Start']))
+          const plannedDays = num(pick(r, ['Planned Days']))
+          const plannedEnd = parseExcelDate(pick(r, ['Planned Completion', 'Planned End']))
+
+          const baselineStart = parseExcelDate(pick(r, ['Baseline Start']))
+          const baselineDays = num(pick(r, ['Baseline Days']))
+          const baselineEnd = parseExcelDate(pick(r, ['Baseline Completion', 'Baseline End']))
+
+          const actualStart = parseExcelDate(pick(r, ['Actual Start']))
+          const actualEnd = parseExcelDate(pick(r, ['Actual Completion', 'Actual End']))
+          const actualDays = num(pick(r, ['Actual Days Taken', 'Actual Days']))
+
+          const pctComplete = pct(pick(r, ['% Complete']))
+          const critical = String(pick(r, ['Critical Path']) ?? '').trim().toLowerCase()
+
+          const unit = String(pick(r, ['Unit']) ?? '').trim()
+          const quantity = num(pick(r, ['Quantity']))
+          const wastePct = num(pick(r, ['Waste %']))
+          const unitRate = num(pick(r, ['Unit Rate']))
+          const netQty = num(pick(r, ['Net Qty']))
+          const boqAmount = num(pick(r, ['BOQ Amount']))
+
+          const estCost = num(pick(r, ['Estimated Cost', 'Est. Cost']))
+          const actCost = num(pick(r, ['Actual Cost']))
+          const schedVar = num(pick(r, ['Variance (Planned vs. Baseline)', 'Schedule Var (d)']))
+          const costVar = num(pick(r, ['Cost Variance']))
+
+          const payload: Record<string, unknown> = {
+            projectid,
+            sow_number: sowNumber,
+            hierarchy_level: hl,
+            scope_l1: scope || undefined,
+            item_l2: item || undefined,
+            sub_item_l3: subItem || undefined,
+            particulars: particulars || undefined,
+            assigned_to: String(pick(r, ['Assigned To']) ?? '').trim() || undefined,
+            planned_start: plannedStart,
+            planned_days: plannedDays,
+            planned_end: plannedEnd,
+            baseline_start: baselineStart,
+            baseline_days: baselineDays,
+            baseline_end: baselineEnd,
+            actual_start: actualStart,
+            actual_days: actualDays,
+            actual_end: actualEnd,
+            percent_complete: pctComplete,
+            schedule_variance: schedVar,
+            is_critical_path: critical === 'yes' || critical === 'true' || critical === '1',
+            unit: unit || undefined,
+            quantity,
+            waste_pct: wastePct,
+            net_qty: netQty,
+            unit_rate: unitRate,
+            boq_amount: boqAmount,
+            estimated_cost: estCost,
+            actual_cost: actCost,
+            cost_variance: costVar,
+            risk_level: normalizeRisk(pick(r, ['Risk Level'])),
+            status: normalizeSowStatus(pick(r, ['Status'])),
+            dep_on: String(pick(r, ['Dependent On', 'Dep. On (SOW#)']) ?? '').trim() || undefined,
+            dep_type: normalizeDepType(pick(r, ['Dependency Type', 'Dep. Type'])),
+            notes: String(pick(r, ['Notes']) ?? '').trim() || undefined,
+            plant: String(pick(r, ['Plant']) ?? '').trim() || undefined,
+            site_equipment: String(pick(r, ['Site Equipment', 'Site Equip.']) ?? '').trim() || undefined,
+            manpower: String(pick(r, ['Manpower', 'Resources']) ?? '').trim() || undefined,
+          }
+
+          Object.keys(payload).forEach((k) => {
+            if (payload[k] === '' || payload[k] === null || payload[k] === undefined) delete payload[k]
+          })
+
+          return payload
+        })
+        .filter(Boolean) as Record<string, unknown>[]
+
+      if (mapped.length === 0) {
+        throw new Error('No valid SOW rows found. Ensure the template uses the MASTER SOW sheet and contains a Serial column.')
+      }
+
+      setTemplateImportMsg('Clearing existing SOW items...')
+      const { error: delErr } = await supabase.from('sow_items').delete().eq('projectid', projectid)
+      if (delErr) throw new Error(delErr.message)
+
+      setTemplateImportMsg(`Importing ${mapped.length} rows...`)
+      const BATCH = 250
+      for (let i = 0; i < mapped.length; i += BATCH) {
+        const slice = mapped.slice(i, i + BATCH)
+        const { error: insErr } = await supabase.from('sow_items').insert(slice)
+        if (insErr) throw new Error(insErr.message)
+        setTemplateImportMsg(`Imported ${Math.min(mapped.length, i + BATCH)} / ${mapped.length}...`)
+      }
+
+      setTemplateImportMsg('Import complete. Refreshing...')
+
+      // Sync L1 scope items into the standalone tasks table as punch tasks.
+      const l1Rows = mapped.filter(r => r.hierarchy_level === 1)
+      if (l1Rows.length > 0) {
+        setTemplateImportMsg('Syncing L1 scopes to punch list...')
+        await supabase.from('tasks')
+          .delete()
+          .eq('projectid', projectid)
+          .like('source_ref', 'cpos-l1-%')
+
+        const punchTasks = l1Rows.map(r => ({
+          projectid,
+          title: String(r.scope_l1 || r.sow_number),
+          priority: 'Medium',
+          status: mapSowStatusToTaskStatus(String(r.status || 'Not Started')),
+          due_date: r.planned_end || r.baseline_end || null,
+          assigned_to: r.assigned_to || null,
+          source_ref: `cpos-l1-${r.sow_number}`,
+        }))
+        await supabase.from('tasks').insert(punchTasks)
+      }
+
+      await fetchAll()
+      setTemplateImportMsg('')
+    } catch (e) {
+      setTemplateImportError(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setTemplateImporting(false)
+    }
+  }
+
+  async function handleDownloadTemplate() {
+    if (isPublicSolar) return
+    setTemplateDownloading(true)
+    try {
+      const res = await fetch('/api/template/download')
+      if (res.status === 403) {
+        window.location.href = '/pricing'
+        return
+      }
+      if (!res.ok) throw new Error('Download failed')
+      const { url } = await res.json()
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'CPOS_Master_Template_with_Form.xlsm'
+      a.click()
+    } catch {
+      setTemplateImportError('Could not download template. Please try again.')
+    } finally {
+      setTemplateDownloading(false)
+    }
   }
 
   if (loading) {
@@ -600,22 +909,106 @@ export default function ProjectDetail() {
             </motion.div>
           )}
 
-          {(activeTab === 'timeline' || activeTab === 'tasks') && (
-             <motion.div
+          {activeTab === 'timeline' && (
+            <motion.div
+              key="timeline"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
               className="space-y-8"
-             >
-               <div className="bg-white border border-slate-100 rounded-[40px] p-20 text-center text-slate-400 font-bold">
-                  <BarChart3 className="w-16 h-16 text-slate-200 mx-auto mb-6" />
-                  <h3 className="text-2xl font-black text-slate-900 tracking-tight">Advanced Management Tools</h3>
-                  <p className="text-slate-500 mt-2">Gantt and SOW views are being optimized for higher density construction data.</p>
-                  <div className="flex items-center justify-center gap-4 mt-10">
-                    <button onClick={() => fetchAll()} className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-bold uppercase tracking-widest text-xs">Refresh Core Data</button>
-                    <button className="px-6 py-3 bg-white border border-slate-200 text-slate-700 rounded-2xl font-bold uppercase tracking-widest text-xs">Request Audit</button>
+            >
+              <div className="bg-white border border-slate-100 rounded-[40px] shadow-sm p-8 md:p-10">
+                <div className="flex items-center justify-between gap-4 mb-8 flex-wrap">
+                  <div>
+                    <h3 className="text-2xl font-black tracking-tight">Project Schedule</h3>
+                    <p className="text-slate-500 font-medium">{project.start_date} → {project.end_date}</p>
                   </div>
-               </div>
-             </motion.div>
+                  <div className="flex gap-3 items-center flex-wrap">
+                    <button
+                      className="px-4 py-2 border border-emerald-500/30 text-emerald-600 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-emerald-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={isPublicSolar || templateDownloading}
+                      onClick={handleDownloadTemplate}
+                    >
+                      <Download className="w-4 h-4" />
+                      {templateDownloading ? 'Preparing...' : 'Get Template'}
+                    </button>
+                    <button
+                      className="px-4 py-2 bg-orange-500 text-white rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={isPublicSolar || templateImporting}
+                      onClick={() => templateInputRef.current?.click()}
+                    >
+                      <Upload className="w-4 h-4" />
+                      {templateImporting ? 'Uploading...' : 'Upload Template'}
+                    </button>
+                  </div>
+                </div>
+                {templateImportMsg && (
+                  <div className="px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm font-medium mb-4">
+                    {templateImportMsg}
+                  </div>
+                )}
+                {templateImportError && (
+                  <div className="px-4 py-2 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-medium mb-4">
+                    {templateImportError}
+                  </div>
+                )}
+                <input
+                  ref={templateInputRef}
+                  type="file"
+                  accept=".xlsx,.xlsm,.xls,.csv"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    e.currentTarget.value = ''
+                    if (!f) return
+                    void handleUploadMasterTemplate(f)
+                  }}
+                />
+                <div className="text-center py-20 text-slate-400">
+                  <Calendar className="w-16 h-16 text-slate-200 mx-auto mb-4" />
+                  <p className="font-medium">No schedule data yet. Upload the CPOS Master Template to populate the timeline.</p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'tasks' && (
+            <motion.div
+              key="tasks"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-8"
+            >
+              <div className="bg-white border border-slate-100 rounded-[40px] shadow-sm p-8 md:p-10">
+                <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-2xl font-black tracking-tight">Tasks & SOW</h3>
+                  <Link href={`/dashboard/${projectid}/sow`} className="text-sm font-bold text-orange-600 flex items-center gap-1">
+                    Full SOW <ChevronRight className="w-4 h-4" />
+                  </Link>
+                </div>
+                <div className="space-y-2">
+                  {tasks.slice(0, 5).map((task) => (
+                    <div key={task.task_id} className="flex items-center gap-4 p-4 hover:bg-slate-50 rounded-2xl transition-colors border border-transparent hover:border-slate-100">
+                      <div className={`w-2 h-2 rounded-full ${task.status === 'Done' ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-slate-900">{task.title}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">{task.assigned_to || 'Unassigned'}</p>
+                      </div>
+                      <span className={`text-[10px] font-black px-2 py-1 rounded-lg uppercase bg-slate-100 text-slate-500 border border-slate-200`}>
+                        {task.priority}
+                      </span>
+                    </div>
+                  ))}
+                  {tasks.length === 0 && (
+                    <div className="text-center py-10 text-slate-400">
+                      <CheckSquare className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+                      <p className="font-medium">No tasks yet. Upload the CPOS Master Template to auto-generate tasks from SOW.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
           )}
         </AnimatePresence>
       </main>

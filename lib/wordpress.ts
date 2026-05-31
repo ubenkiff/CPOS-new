@@ -233,3 +233,11 @@ export function getCategoryBadgeStyles(category: string): string {
   return "bg-orange-50 text-orange-600 border border-orange-100/70";
 }
 
+/**
+ * Fetches a single post by slug from WordPress or fallback
+ */
+export async function fetchWPPostBySlug(slug: string): Promise<WPPost | null> {
+  const { posts } = await fetchWordPressPosts();
+  return posts.find(post => post.slug === slug) || null;
+}
+
