@@ -116,6 +116,7 @@ export default function ProjectDetail() {
   const [templateImportMsg, setTemplateImportMsg] = useState('')
   const [templateImportError, setTemplateImportError] = useState('')
   const [templateDownloading, setTemplateDownloading] = useState(false)
+  const [showExportMenu, setShowExportMenu] = useState(false)
 
   useEffect(() => {
     if (!projectid) return
@@ -212,19 +213,47 @@ export default function ProjectDetail() {
   // Excel template upload functions
   function parseExcelDate(v: unknown): string | undefined {
     if (v === null || v === undefined || v === '') return undefined
+    
     if (typeof v === 'string') {
       const trimmed = v.trim()
       if (!trimmed) return undefined
+      
+      // Try parsing as a date string
       const d = new Date(trimmed)
-      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]
+      if (!isNaN(d.getTime())) {
+        const iso = d.toISOString().split('T')[0]
+        console.log(`[Date Parse] String "${trimmed}" -> ${iso}`)
+        return iso
+      }
+      
+      // Try Excel serial number as string
+      const numVal = parseFloat(trimmed)
+      if (!isNaN(numVal)) {
+        const excelDate = XLSX.SSF.parse_date_code(numVal)
+        if (excelDate) {
+          const dt = new Date(Date.UTC(excelDate.y, excelDate.m - 1, excelDate.d))
+          const iso = dt.toISOString().split('T')[0]
+          console.log(`[Date Parse] Excel serial "${numVal}" -> ${iso}`)
+          return iso
+        }
+      }
+      
+      console.warn(`[Date Parse] Failed to parse string date: "${trimmed}"`)
       return undefined
     }
+    
     if (typeof v === 'number') {
       const d = XLSX.SSF.parse_date_code(v)
-      if (!d) return undefined
+      if (!d) {
+        console.warn(`[Date Parse] Failed to parse Excel serial date: ${v}`)
+        return undefined
+      }
       const dt = new Date(Date.UTC(d.y, d.m - 1, d.d))
-      return dt.toISOString().split('T')[0]
+      const iso = dt.toISOString().split('T')[0]
+      console.log(`[Date Parse] Excel serial ${v} -> ${iso}`)
+      return iso
     }
+    
     return undefined
   }
 
@@ -517,6 +546,25 @@ export default function ProjectDetail() {
     }
   }
 
+  async function handleExport(format: 'mspdi' | 'xer') {
+    setShowExportMenu(false)
+    try {
+      const res = await fetch(`/api/export/${projectid}?format=${format}`)
+      if (!res.ok) throw new Error('Export failed')
+      
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${project.project_name.replace(/\s+/g, '_')}.${format === 'mspdi' ? 'xml' : 'xer'}`
+      a.click()
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Export error:', error)
+      alert('Export failed. Please try again.')
+    }
+  }
+
   if (loading) {
     return (
       <div 
@@ -628,6 +676,37 @@ export default function ProjectDetail() {
             </button>
           ))}
           <div className="ml-auto flex items-center gap-2 py-2">
+            <div className="relative">
+              <button
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm ${
+                  isDark ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-100 text-slate-900 hover:bg-slate-200'
+                }`}
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export
+              </button>
+              {showExportMenu && (
+                <div className={`absolute right-0 mt-2 w-48 rounded-xl shadow-lg border z-50 ${
+                  isDark ? 'bg-[#161b22] border-[#21262d]' : 'bg-white border-slate-200'
+                }`}>
+                  <button
+                    onClick={() => handleExport('mspdi')}
+                    className="w-full px-4 py-3 text-left text-xs font-bold flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-[#21262d] rounded-t-xl"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    MS Project (XML)
+                  </button>
+                  <button
+                    onClick={() => handleExport('xer')}
+                    className="w-full px-4 py-3 text-left text-xs font-bold flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-[#21262d] rounded-b-xl"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    Primavera P6 (XER)
+                  </button>
+                </div>
+              )}
+            </div>
             <Link 
               href={`/dashboard/${projectid}/reports`} 
               className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm ${
