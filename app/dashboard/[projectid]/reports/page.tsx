@@ -1350,6 +1350,8 @@ export default function ReportsModule() {
   }
 
   function GanttReport() {
+    const [viewMode, setViewMode] = React.useState<'day' | 'week' | 'month' | 'quarter' | 'half-year'>('day')
+    
     const l3Items = sowItems.filter(r => r.hierarchy_level === 3)
     const l2Items = sowItems.filter(r => r.hierarchy_level === 2)
     const l1Items = sowItems.filter(r => r.hierarchy_level === 1)
@@ -1372,7 +1374,7 @@ export default function ReportsModule() {
     const rangeEnd = validEnds.length > 0 ? validEnds.sort().reverse()[0] : project.end_date
     const totalDays = Math.max(1, daysBetween(rangeStart, rangeEnd))
 
-    const COL_W = 8
+    const COL_W = viewMode === 'day' ? 8 : viewMode === 'week' ? 30 : viewMode === 'month' ? 80 : viewMode === 'quarter' ? 200 : 400
     const ROW_H = 24
     const LABEL_W = 200
 
@@ -1406,13 +1408,34 @@ export default function ReportsModule() {
     const ganttWidth = totalDays * COL_W
 
     return (
-      <div style={{ padding: '20px', fontSize: 10 }}>
+      <div style={{ padding: '10px', fontSize: 10 }}>
         <ReportHeader />
-        <div style={{ marginBottom: 20, display: 'flex', gap: 40, fontSize: 9 }}>
+        <div style={{ marginBottom: 10, display: 'flex', gap: 30, fontSize: 9 }}>
           <div><strong>Project Period:</strong> {project.start_date} → {project.end_date}</div>
           <div><strong>Chart Period:</strong> {rangeStart} → {rangeEnd}</div>
           <div><strong>Total Days:</strong> {totalDays}</div>
           <div><strong>Total Tasks:</strong> {l3Items.length}</div>
+        </div>
+        <div style={{ marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', fontSize: 9 }}>
+          <strong>View Mode:</strong>
+          {(['day', 'week', 'month', 'quarter', 'half-year'] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              style={{
+                padding: '4px 8px',
+                fontSize: 8,
+                fontWeight: 600,
+                background: viewMode === mode ? '#a855f7' : '#f3f4f6',
+                color: viewMode === mode ? '#ffffff' : '#374151',
+                border: '1px solid #e5e7eb',
+                borderRadius: 4,
+                cursor: 'pointer',
+              }}
+            >
+              {mode.charAt(0).toUpperCase() + mode.slice(1).replace('-', ' ')}
+            </button>
+          ))}
         </div>
         {hasSchedule.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>No schedule data available</div>
@@ -1429,35 +1452,136 @@ export default function ReportsModule() {
                       <div style={{ flex: 1, minWidth: ganttWidth }}>
                         <div style={{ height: 22, display: 'flex', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
                           {(() => {
-                            const months: { label: string; days: number }[] = []
-                            const cur = new Date(rangeStart)
-                            const end = new Date(rangeEnd)
-                            while (cur <= end) {
-                              const daysInMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate()
-                              const remaining = Math.ceil((end.getTime() - cur.getTime()) / 86400000) + 1
-                              const days = Math.min(daysInMonth - cur.getDate() + 1, remaining)
-                              months.push({ label: cur.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' }), days })
-                              cur.setMonth(cur.getMonth() + 1)
+                            if (viewMode === 'day') {
+                              const months: { label: string; days: number }[] = []
+                              const cur = new Date(rangeStart)
+                              const end = new Date(rangeEnd)
+                              while (cur <= end) {
+                                const daysInMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate()
+                                const remaining = Math.ceil((end.getTime() - cur.getTime()) / 86400000) + 1
+                                const days = Math.min(daysInMonth - cur.getDate() + 1, remaining)
+                                months.push({ label: cur.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' }), days })
+                                cur.setMonth(cur.getMonth() + 1)
+                                cur.setDate(1)
+                              }
+                              return months.map((h, i) => (
+                                <div key={i} style={{ width: h.days * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
+                                  {h.label}
+                                </div>
+                              ))
+                            } else if (viewMode === 'week') {
+                              const weeks: { label: string; weeks: number }[] = []
+                              const cur = new Date(rangeStart)
+                              const end = new Date(rangeEnd)
+                              let weekNum = 1
+                              while (cur <= end) {
+                                const weekEnd = new Date(cur.getTime() + 7 * 86400000)
+                                const remaining = Math.ceil((end.getTime() - cur.getTime()) / 86400000) + 1
+                                const weeksCount = Math.min(1, Math.ceil(remaining / 7))
+                                weeks.push({ label: `W${weekNum}`, weeks: weeksCount })
+                                cur.setDate(cur.getDate() + 7)
+                                weekNum++
+                              }
+                              return weeks.map((h, i) => (
+                                <div key={i} style={{ width: h.weeks * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
+                                  {h.label}
+                                </div>
+                              ))
+                            } else if (viewMode === 'month') {
+                              const months: { label: string; months: number }[] = []
+                              const cur = new Date(rangeStart)
+                              const end = new Date(rangeEnd)
+                              while (cur <= end) {
+                                months.push({ label: cur.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' }), months: 1 })
+                                cur.setMonth(cur.getMonth() + 1)
+                                cur.setDate(1)
+                              }
+                              return months.map((h, i) => (
+                                <div key={i} style={{ width: h.months * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
+                                  {h.label}
+                                </div>
+                              ))
+                            } else if (viewMode === 'quarter') {
+                              const quarters: { label: string; quarters: number }[] = []
+                              const cur = new Date(rangeStart)
+                              const end = new Date(rangeEnd)
+                              const quarter = Math.floor(cur.getMonth() / 3) + 1
+                              const year = cur.getFullYear()
+                              quarters.push({ label: `Q${quarter} ${year}`, quarters: 1 })
+                              cur.setMonth(cur.getMonth() + 3)
                               cur.setDate(1)
+                              while (cur <= end) {
+                                const q = Math.floor(cur.getMonth() / 3) + 1
+                                const y = cur.getFullYear()
+                                quarters.push({ label: `Q${q} ${y}`, quarters: 1 })
+                                cur.setMonth(cur.getMonth() + 3)
+                                cur.setDate(1)
+                              }
+                              return quarters.map((h, i) => (
+                                <div key={i} style={{ width: h.quarters * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
+                                  {h.label}
+                                </div>
+                              ))
+                            } else {
+                              const halfYears: { label: string; halfYears: number }[] = []
+                              const cur = new Date(rangeStart)
+                              const end = new Date(rangeEnd)
+                              const halfYear = cur.getMonth() < 6 ? 'H1' : 'H2'
+                              const year = cur.getFullYear()
+                              halfYears.push({ label: `${halfYear} ${year}`, halfYears: 1 })
+                              cur.setMonth(cur.getMonth() + 6)
+                              cur.setDate(1)
+                              while (cur <= end) {
+                                const hy = cur.getMonth() < 6 ? 'H1' : 'H2'
+                                const y = cur.getFullYear()
+                                halfYears.push({ label: `${hy} ${y}`, halfYears: 1 })
+                                cur.setMonth(cur.getMonth() + 6)
+                                cur.setDate(1)
+                              }
+                              return halfYears.map((h, i) => (
+                                <div key={i} style={{ width: h.halfYears * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
+                                  {h.label}
+                                </div>
+                              ))
                             }
-                            return months.map((h, i) => (
-                              <div key={i} style={{ width: h.days * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
-                                {h.label}
-                              </div>
-                            ))
                           })()}
                         </div>
                         <div style={{ height: 22, display: 'flex', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
-                          {Array.from({ length: totalDays }).map((_, d) => {
-                            const date = new Date(new Date(rangeStart).getTime() + d * 86400000).toISOString().split('T')[0]
-                            const dayNum = new Date(date).getDate()
-                            if (dayNum !== 1 && dayNum !== 8 && dayNum !== 15 && dayNum !== 22) return <div key={d} style={{ width: COL_W, flexShrink: 0 }} />
-                            return (
-                              <div key={d} style={{ width: COL_W, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: dayNum === 1 ? '1px solid #d1d5db' : 'none', fontSize: 7 }}>
-                                {dayNum}
-                              </div>
-                            )
-                          })}
+                          {viewMode === 'day' ? (
+                            Array.from({ length: totalDays }).map((_, d) => {
+                              const date = new Date(new Date(rangeStart).getTime() + d * 86400000).toISOString().split('T')[0]
+                              const dayNum = new Date(date).getDate()
+                              if (dayNum !== 1 && dayNum !== 8 && dayNum !== 15 && dayNum !== 22) return <div key={d} style={{ width: COL_W, flexShrink: 0 }} />
+                              return (
+                                <div key={d} style={{ width: COL_W, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: dayNum === 1 ? '1px solid #d1d5db' : 'none', fontSize: 7 }}>
+                                  {dayNum}
+                                </div>
+                              )
+                            })
+                          ) : viewMode === 'week' ? (
+                            Array.from({ length: Math.ceil(totalDays / 7) }).map((_, w) => {
+                              const weekStart = new Date(new Date(rangeStart).getTime() + w * 7 * 86400000).toISOString().split('T')[0]
+                              const weekEnd = new Date(new Date(rangeStart).getTime() + (w + 1) * 7 * 86400000).toISOString().split('T')[0]
+                              return (
+                                <div key={w} style={{ width: COL_W, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e5e7eb', fontSize: 7 }}>
+                                  {weekStart.slice(5)}
+                                </div>
+                              )
+                            })
+                          ) : viewMode === 'month' ? (
+                            Array.from({ length: Math.ceil(totalDays / 30) }).map((_, m) => {
+                              const monthStart = new Date(new Date(rangeStart).getTime() + m * 30 * 86400000)
+                              return (
+                                <div key={m} style={{ width: COL_W, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e5e7eb', fontSize: 7 }}>
+                                  {monthStart.toLocaleDateString('en-ZA', { month: 'short' })}
+                                </div>
+                              )
+                            })
+                          ) : (
+                            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7 }}>
+                              {viewMode === 'quarter' ? 'Quarterly View' : 'Half-Yearly View'}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
