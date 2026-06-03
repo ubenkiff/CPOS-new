@@ -1437,6 +1437,25 @@ export default function ReportsModule() {
             </button>
           ))}
         </div>
+        <div style={{ marginBottom: 10, padding: '8px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 4 }}>
+          <div style={{ fontSize: 8, color: '#6b7280', marginBottom: 4 }}>Timeline Overview</div>
+          <div style={{ position: 'relative', height: '8px', background: '#e5e7eb', borderRadius: 4 }}>
+            <div
+              style={{
+                position: 'absolute',
+                left: `${Math.max(0, (daysBetween(project.start_date, rangeStart) / daysBetween(project.start_date, project.end_date)) * 100)}%`,
+                width: `${Math.min(100, (daysBetween(rangeStart, rangeEnd) / daysBetween(project.start_date, project.end_date)) * 100)}%`,
+                height: '100%',
+                background: '#a855f7',
+                borderRadius: 4,
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 7, color: '#6b7280', marginTop: 2 }}>
+            <span>{project.start_date}</span>
+            <span>{project.end_date}</span>
+          </div>
+        </div>
         {hasSchedule.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>No schedule data available</div>
         ) : (
