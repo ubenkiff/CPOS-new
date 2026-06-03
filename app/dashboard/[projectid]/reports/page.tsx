@@ -1350,7 +1350,7 @@ export default function ReportsModule() {
   }
 
   function GanttReport() {
-    const [viewMode, setViewMode] = React.useState<'day' | 'week' | 'month' | 'quarter' | 'half-year'>('day')
+    const [viewMode, setViewMode] = useState<'day' | 'week' | 'month' | 'quarter' | 'half-year'>('day')
     
     const l3Items = sowItems.filter(r => r.hierarchy_level === 3)
     const l2Items = sowItems.filter(r => r.hierarchy_level === 2)
