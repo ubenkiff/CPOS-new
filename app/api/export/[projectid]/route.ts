@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '../../../supabase'
-import { exportToMSPDI } from '../../../../lib/translation/exporters/mspdi'
-import { exportToXER } from '../../../../lib/translation/exporters/xer'
+import { exportSowToXER, exportSowToMSPDI } from '../../../../lib/schedulerParser'
 
 export async function GET(
   request: NextRequest,
@@ -40,11 +39,11 @@ export async function GET(
 
     // Export based on format
     if (format === 'xer') {
-      content = exportToXER(project, sowItems || [])
+      content = exportSowToXER(project, sowItems || [])
       filename = `${project.project_name.replace(/\s+/g, '_')}.xer`
       contentType = 'text/plain'
     } else if (format === 'mspdi') {
-      content = exportToMSPDI(project, sowItems || [])
+      content = exportSowToMSPDI(project, sowItems || [])
       filename = `${project.project_name.replace(/\s+/g, '_')}.xml`
       contentType = 'application/xml'
     } else {

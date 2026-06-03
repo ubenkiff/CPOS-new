@@ -510,3 +510,218 @@ export function parseCSVToSow(rows: Record<string, unknown>[], headers: Set<stri
 
   return items.sort((a, b) => a.sow_number.localeCompare(b.sow_number, undefined, { numeric: true, sensitivity: 'base' }))
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. EXPORT FUNCTIONS (CPOS to Primavera P6 XER and MS Project MSPDI)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ProjectMetadata {
+  project_name: string
+  project_code?: string
+  description?: string
+  client_name?: string
+  start_date: string
+  end_date: string
+}
+
+/**
+ * Export CPOS SOW items to Primavera P6 XER format
+ */
+export function exportSowToXER(project: ProjectMetadata, sowItems: ParsedSowItem[]): string {
+  let xer = 'ERMHDR\t%R\t1\t1\n' // XER header
+  xer += 'EXPORT\tUSER\tCPOS\t' + new Date().toISOString().split('T')[0] + '\t' + new Date().toISOString() + '\n'
+  
+  // Project record
+  xer += '%T\tPROJWBS\n'
+  xer += '%F\twbs_id\twbs_name\twbs_short_name\tseq_num\tparent_wbs_id\tstatus_code\n'
+  xer += '%R\tPROJ_WBS_ID\t' + project.project_name + '\t' + project.project_name + '\t' + project.project_name + '\t1\t\tWS_Open\n'
+  
+  xer += '%T\tPROJECT\n'
+  xer += '%F\tproj_id\tproj_short_name\tproj_name\tlast_update_date\tplan_start_date\tplan_end_date\n'
+  xer += '%R\t' + project.project_code + '\t' + project.project_name + '\t' + project.project_name + '\t' + new Date().toISOString() + '\t' + project.start_date + '\t' + project.end_date + '\n'
+  
+  // Task records
+  const taskMap = new Map<string, string>()
+  let taskIdCounter = 1
+  
+  // Sort by hierarchy level and sow_number
+  const sortedItems = sowItems.sort((a, b) => {
+    if (a.hierarchy_level !== b.hierarchy_level) {
+      return a.hierarchy_level - b.hierarchy_level
+    }
+    return a.sow_number.localeCompare(b.sow_number, undefined, { numeric: true, sensitivity: 'base' })
+  })
+  
+  xer += '%T\tTASK\n'
+  xer += '%F\ttask_id\ttask_code\ttask_name\twbs_id\tstatus_code\ttarget_start_date\ttarget_end_date\tduration_type\ttarget_duration\tact_start_date\tact_end_date\tact_work_qty\n'
+  
+  sortedItems.forEach((item) => {
+    const taskId = `TASK${taskIdCounter++}`
+    taskMap.set(item.sow_number, taskId)
+    
+    const taskName = item.sub_item_l3 || item.item_l2 || item.scope_l1 || item.sow_number
+    const startDate = item.baseline_start || item.planned_start || project.start_date
+    const endDate = item.baseline_end || item.planned_end || project.end_date
+    const duration = (item.baseline_days || item.planned_days || 0) * 8 // Convert days to hours
+    
+    xer += '%R\t' + taskId + '\t' + item.sow_number + '\t' + taskName + '\tPROJ_WBS_ID\t'
+    xer += (item.status === 'Complete' ? 'TK_Complete' : item.status === 'In Progress' ? 'TK_Active' : 'TK_NotStart') + '\t'
+    xer += startDate + '\t' + endDate + '\tFixedDurationUnits\t' + duration
+    
+    if (item.actual_start) xer += '\t' + item.actual_start
+    else xer += '\t'
+    
+    if (item.actual_end) xer += '\t' + item.actual_end
+    else xer += '\t'
+    
+    xer += '\t' + (item.percent_complete || 0) + '\n'
+  })
+  
+  // Predecessor records
+  xer += '%T\tTASKPRED\n'
+  xer += '%F\ttask_id\tpred_task_id\tpred_type\tlag_hr\n'
+  
+  sortedItems.forEach((item) => {
+    if (item.dep_on) {
+      const taskId = taskMap.get(item.sow_number)
+      const predTaskId = taskMap.get(item.dep_on)
+      if (taskId && predTaskId) {
+        const predType = item.dep_type === 'SS' ? 'PR_SS' : item.dep_type === 'FF' ? 'PR_FF' : item.dep_type === 'SF' ? 'PR_SF' : 'PR_FS'
+        xer += '%R\t' + taskId + '\t' + predTaskId + '\t' + predType + '\t0\n'
+      }
+    }
+  })
+  
+  xer += 'TMRTASK\tEND\n' // End marker
+  
+  return xer
+}
+
+/**
+ * Export CPOS SOW items to Microsoft Project MSPDI XML format
+ */
+export function exportSowToMSPDI(project: ProjectMetadata, sowItems: ParsedSowItem[]): string {
+  const tasks = convertSowToMSPDITasks(sowItems)
+  
+  let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+  xml += '<Project xmlns="http://schemas.microsoft.com/project">\n'
+  xml += '  <Name>' + escapeXML(project.project_name) + '</Name>\n'
+  if (project.description) xml += '  <Title>' + escapeXML(project.description) + '</Title>\n'
+  if (project.client_name) xml += '  <Company>' + escapeXML(project.client_name) + '</Company>\n'
+  xml += '  <StartDate>' + formatMSPDIDate(project.start_date) + '</StartDate>\n'
+  xml += '  <FinishDate>' + formatMSPDIDate(project.end_date) + '</FinishDate>\n'
+  xml += '  <Tasks>\n'
+  
+  tasks.forEach(task => {
+    xml += '    <Task>\n'
+    xml += '      <UID>' + task.UID + '</UID>\n'
+    xml += '      <ID>' + task.ID + '</ID>\n'
+    xml += '      <Name>' + escapeXML(task.Name) + '</Name>\n'
+    if (task.WBS) xml += '      <WBS>' + escapeXML(task.WBS) + '</WBS>\n'
+    xml += '      <OutlineLevel>' + task.OutlineLevel + '</OutlineLevel>\n'
+    if (task.Start) xml += '      <Start>' + formatMSPDIDate(task.Start) + '</Start>\n'
+    if (task.Finish) xml += '      <Finish>' + formatMSPDIDate(task.Finish) + '</Finish>\n'
+    if (task.Duration) xml += '      <Duration>' + task.Duration + '</Duration>\n'
+    if (task.PercentComplete !== undefined) xml += '      <PercentComplete>' + task.PercentComplete + '</PercentComplete>\n'
+    if (task.PredecessorLink) {
+      task.PredecessorLink.forEach(pred => {
+        xml += '      <PredecessorLink>\n'
+        xml += '        <PredecessorUID>' + pred.PredecessorUID + '</PredecessorUID>\n'
+        xml += '        <Type>' + pred.Type + '</Type>\n'
+        if (pred.Lag) xml += '        <Lag>' + pred.Lag + '</Lag>\n'
+        xml += '      </PredecessorLink>\n'
+      })
+    }
+    xml += '    </Task>\n'
+  })
+  
+  xml += '  </Tasks>\n'
+  xml += '</Project>\n'
+  
+  return xml
+}
+
+interface MSPDITask {
+  UID: number
+  ID: number
+  Name: string
+  WBS?: string
+  OutlineLevel: number
+  Start?: string
+  Finish?: string
+  Duration?: string
+  PercentComplete?: number
+  PredecessorLink?: MSPDIPredecessor[]
+}
+
+interface MSPDIPredecessor {
+  PredecessorUID: number
+  Type: number // 0=FS, 1=SS, 2=FF, 3=SF
+  Lag?: string
+}
+
+function convertSowToMSPDITasks(sowItems: ParsedSowItem[]): MSPDITask[] {
+  const tasks: MSPDITask[] = []
+  const taskMap = new Map<string, number>()
+  let uidCounter = 1
+  
+  const sortedItems = sowItems.sort((a, b) => {
+    if (a.hierarchy_level !== b.hierarchy_level) {
+      return a.hierarchy_level - b.hierarchy_level
+    }
+    return a.sow_number.localeCompare(b.sow_number, undefined, { numeric: true, sensitivity: 'base' })
+  })
+  
+  sortedItems.forEach((item) => {
+    const uid = uidCounter++
+    taskMap.set(item.sow_number, uid)
+    
+    const task: MSPDITask = {
+      UID: uid,
+      ID: uid,
+      Name: item.sub_item_l3 || item.item_l2 || item.scope_l1 || item.sow_number,
+      WBS: item.sow_number,
+      OutlineLevel: item.hierarchy_level,
+    }
+    
+    if (item.planned_start || item.baseline_start) {
+      task.Start = item.baseline_start || item.planned_start
+    }
+    if (item.planned_end || item.baseline_end) {
+      task.Finish = item.baseline_end || item.planned_end
+    }
+    if (item.planned_days || item.baseline_days) {
+      const days = item.baseline_days || item.planned_days
+      task.Duration = 'PT' + (days * 8) + 'H0M0S'
+    }
+    if (item.percent_complete !== undefined) {
+      task.PercentComplete = item.percent_complete
+    }
+    if (item.dep_on) {
+      const predecessorUid = taskMap.get(item.dep_on)
+      if (predecessorUid) {
+        const type = item.dep_type === 'SS' ? 1 : item.dep_type === 'FF' ? 2 : item.dep_type === 'SF' ? 3 : 0
+        task.PredecessorLink = [{ PredecessorUID: predecessorUid, Type: type }]
+      }
+    }
+    
+    tasks.push(task)
+  })
+  
+  return tasks
+}
+
+function escapeXML(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+function formatMSPDIDate(dateStr: string): string {
+  const date = new Date(dateStr)
+  return date.toISOString()
+}
