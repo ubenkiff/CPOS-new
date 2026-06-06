@@ -8,7 +8,8 @@ import {
   ArrowLeft, LayoutDashboard, Calendar, CheckSquare, 
   DollarSign, FileText, Download, Upload, AlertCircle, 
   ChevronRight, MoreVertical, Plus, Clock, Shield,
-  BarChart3, Users, Filter, Search, Trash2, Edit2, Settings
+  BarChart3, Users, Filter, Search, Trash2, Edit2, Settings,
+  FolderOpen
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import Link from 'next/link'
@@ -707,6 +708,15 @@ export default function ProjectDetail() {
                 </div>
               )}
             </div>
+            <Link 
+              href={`/dashboard/${projectid}/documents`} 
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm ${
+                isDark ? 'bg-[#161b22] text-slate-300 border border-[#21262d] hover:bg-[#21262d]' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-orange-500" />
+              Documents
+            </Link>
             <Link 
               href={`/dashboard/${projectid}/reports`} 
               className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm ${

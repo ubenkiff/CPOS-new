@@ -17,6 +17,9 @@ type Document = {
   uploaded_by?: string
   created_at: string
   description?: string
+  document_type?: string
+  related_sow_item_id?: string
+  document_category?: string
 }
 
 type Project = {
@@ -26,13 +29,62 @@ type Project = {
 }
 
 const CATEGORIES = [
-  { key: 'master-template', label: 'Master Template', color: '#7F77DD' },
+  { key: 'site-layout-plan', label: 'Site Layout Plan', color: '#7F77DD' },
   { key: 'drawings',        label: 'Drawings',        color: '#60a5fa' },
   { key: 'contracts',       label: 'Contracts',       color: '#f59e0b' },
   { key: 'reports',         label: 'Reports',         color: '#4ade80' },
   { key: 'specs',           label: 'Specifications',  color: '#c084fc' },
   { key: 'photos',          label: 'Photos',          color: '#f87171' },
   { key: 'other',           label: 'Other',           color: '#888780' },
+]
+
+const DOCUMENT_TYPES = [
+  { value: "DLS", label: "Drawing List Schedule (DLS)", category: "Document Register", relation: "1-n" },
+  { value: "RFI", label: "Request for Information (RFI)", category: "CLIENT", relation: "1-1" },
+  { value: "TQ", label: "Technical Query (TQ)", category: "Technical", relation: "1-1" },
+  { value: "NCR", label: "Non-conformance Report (NCR)", category: "Quality", relation: "1-1" },
+  { value: "CAR", label: "Corrective Action Request (CAR)", category: "Quality", relation: "1-1" },
+  { value: "SO", label: "Site Observation (SO)", category: "Site", relation: "1-n" },
+  { value: "IR", label: "Inspection Request (IR)", category: "Quality", relation: "1-1" },
+  { value: "MIR", label: "Material Inspection Request (MIR)", category: "Quality", relation: "1-1" },
+  { value: "WIR", label: "Work Inspection Request (WIR)", category: "Quality", relation: "1-1" },
+  { value: "ITP", label: "Inspection Test Plan (ITP)", category: "Quality", relation: "1-1" },
+  { value: "MS", label: "Method Statement (MS)", category: "CLIENT-Structural", relation: "1-n" },
+  { value: "SDS", label: "Shop Drawing Submission (SDS)", category: "Construction-Build", relation: "1-n" },
+  { value: "AB", label: "As-built Drawing (AB)", category: "Construction", relation: "1-n" },
+  { value: "MAR", label: "Material Approval Request (MAR)", category: "Procurement", relation: "1-1" },
+  { value: "MOS", label: "Method Statement (MOS)", category: "Technical", relation: "1-n" },
+  { value: "RFQ", label: "Request for Quotation (RFQ)", category: "Procurement", relation: "1-n" },
+  { value: "BOQ", label: "Bill of Quantities (BOQ)", category: "Commercial", relation: "1-1" },
+  { value: "VO", label: "Variation Order (VO)", category: "CONTRACTOR/CLIENT", relation: "1-1" },
+  { value: "SI", label: "Site Instruction (SI)", category: "SITE", relation: "1-n" },
+  { value: "FI", label: "Field Instruction (FI)", category: "Site", relation: "1-n" },
+  { value: "SL", label: "Snag List (SL)", category: "Quality", relation: "1-n" },
+  { value: "PL", label: "Punch List (PL)", category: "Quality", relation: "1-n" },
+  { value: "IFC", label: "Issued for Construction (IFC)", category: "Construction", relation: "1-n" },
+  { value: "IFA", label: "Issued for Approval (IFA)", category: "Approval", relation: "1-n" },
+  { value: "IFR", label: "Issued for Review (IFR)", category: "Review", relation: "1-n" },
+  { value: "IFT", label: "Issued for Tender (IFT)", category: "Tender", relation: "1-n" },
+  { value: "NOC", label: "No Objection Certificate (NOC)", category: "Approval", relation: "1-1" },
+  { value: "MOM", label: "Minutes of Meeting (MOM)", category: "contractor-client-PMC", relation: "n-1" },
+  { value: "PR", label: "Purchase Request (PR)", category: "Procurement", relation: "1-1" },
+  { value: "PO", label: "Purchase Order (PO)", category: "Procurement", relation: "1-1" },
+  { value: "RFP", label: "Request for Proposal (RFP)", category: "Procurement", relation: "1-n" },
+  { value: "TS", label: "Technical Submittal (TS)", category: "Technical", relation: "1-1" },
+  { value: "QA", label: "QA Report (QA)", category: "Quality", relation: "n-1" },
+  { value: "QC", label: "QC Report (QC)", category: "Quality", relation: "n-1" },
+  { value: "HSE", label: "HSE Report (HSE)", category: "Safety", relation: "n-1" },
+  { value: "PTW", label: "Permit to Work (PTW)", category: "Safety", relation: "1-1" },
+  { value: "SAT", label: "Site Acceptance Test (SAT)", category: "Testing", relation: "1-1" },
+  { value: "FAT", label: "Factory Acceptance Test (FAT)", category: "Testing", relation: "1-1" },
+  { value: "DCP", label: "DCP Test (DCP)", category: "Geotechnical", relation: "1-n" },
+  { value: "FDT", label: "Field Density Test (FDT)", category: "Geotechnical", relation: "1-n" },
+  { value: "RA", label: "Risk Assessment (RA)", category: "Safety", relation: "1-n" },
+  { value: "EOT", label: "Extension of Time (EOT)", category: "Contractual", relation: "1-1" },
+  { value: "DPR", label: "Daily Progress Report (DPR)", category: "Reporting", relation: "n-1" },
+  { value: "WPR", label: "Weekly Progress Report (WPR)", category: "Reporting", relation: "n-1" },
+  { value: "MPR", label: "Monthly Progress Report (MPR)", category: "Reporting", relation: "n-1" },
+  { value: "GAT", label: "Geotechnical Assessment Report (GAT)", category: "Geotechnical", relation: "1-1" }
 ]
 
 function formatSize(bytes: number): string {
@@ -80,17 +132,31 @@ export default function DocumentsModule() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [activeCategory, setActiveCategory] = useState<string>('all')
-  const [uploadCategory, setUploadCategory] = useState('drawings')
+  const [uploadCategory, setUploadCategory] = useState('site-layout-plan')
   const [uploadDescription, setUploadDescription] = useState('')
   const [showUpload, setShowUpload] = useState(false)
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [sowItems, setSowItems] = useState<any[]>([])
+  const [uploadDocType, setUploadDocType] = useState('')
+  const [relatedSowItemId, setRelatedSowItemId] = useState('')
+
+  // Filters for Document List
+  const [filterDocType, setFilterDocType] = useState('')
+  const [filterSowItem, setFilterSowItem] = useState('')
+
+  // Inline Document Editing States
+  const [editingDoc, setEditingDoc] = useState<Document | null>(null)
+  const [editDescription, setEditDescription] = useState('')
+  const [editDocType, setEditDocType] = useState('')
+  const [editRelatedSowItemId, setEditRelatedSowItemId] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
 
   useEffect(() => {
     if (!projectid) return
     if (isPublicViewOnly) {
-      fetchProject(); fetchDocuments()
+      fetchProject(); fetchDocuments(); fetchSowItems()
       return
     }
     checkSessionAndLoad()
@@ -124,7 +190,16 @@ export default function DocumentsModule() {
       return
     }
 
-    fetchProject(); fetchDocuments()
+    fetchProject(); fetchDocuments(); fetchSowItems()
+  }
+
+  async function fetchSowItems() {
+    const { data } = await supabase
+      .from('sow_items')
+      .select('sow_id,sow_number,scope_l1,item_l2,sub_item_l3')
+      .eq('projectid', projectid)
+      .order('sow_number')
+    setSowItems(data || [])
   }
 
   async function fetchProject() {
@@ -144,23 +219,62 @@ export default function DocumentsModule() {
     setTimeout(() => setToast(null), 4000)
   }
 
-  async function handleFiles(files: FileList | null) {
+  const [tempFiles, setTempFiles] = useState<File[] | null>(null)
+
+  function handleFileSelect(files: FileList | null) {
     if (!files || files.length === 0) return
+    
+    const MAX_SIZE = 10 * 1024 * 1024; // 10MB upload limit
+    const oversizedFiles = Array.from(files).filter(f => f.size > MAX_SIZE);
+    if (oversizedFiles.length > 0) {
+      showToast(`Upload limit exceeded! The following file(s) are larger than 10MB: ${oversizedFiles.map(f => f.name).join(', ')}`, 'err');
+      return;
+    }
+    setTempFiles(Array.from(files))
+  }
+
+  async function handleUploadConfirm() {
+    if (!tempFiles || tempFiles.length === 0) {
+      showToast('No files selected for upload', 'err')
+      return
+    }
+
     setUploading(true)
-    for (const file of Array.from(files)) {
+    let uploadedCount = 0
+    for (const file of tempFiles) {
       const filePath = `projects/${projectid}/${uploadCategory}/${Date.now()}_${file.name}`
       const { error: uploadError } = await supabase.storage.from('cpos-documents').upload(filePath, file, { upsert: false })
-      if (uploadError) { showToast(`Upload failed: ${uploadError.message}`, 'err'); continue }
+      if (uploadError) { 
+        showToast(`Upload failed for ${file.name}: ${uploadError.message}`, 'err')
+        continue 
+      }
       const { error: dbError } = await supabase.from('documents').insert([{
-        projectid, file_name: file.name, file_path: filePath,
-        file_type: file.type || 'application/octet-stream', file_size: file.size,
-        category: uploadCategory, description: uploadDescription || null, uploaded_by: 'User',
+        projectid, 
+        file_name: file.name, 
+        file_path: filePath,
+        file_type: file.type || 'application/octet-stream', 
+        file_size: file.size,
+        category: uploadCategory, 
+        description: uploadDescription || null, 
+        uploaded_by: 'User',
+        document_type: uploadDocType || null,
+        related_sow_item_id: relatedSowItemId || null,
+        document_category: DOCUMENT_TYPES.find(t => t.value === uploadDocType)?.category || null
       }])
-      if (dbError) showToast(`Save failed: ${dbError.message}`, 'err')
-      else showToast(`${file.name} uploaded`)
+      if (dbError) {
+        showToast(`Save failed for ${file.name}: ${dbError.message}`, 'err')
+      } else {
+        uploadedCount++
+      }
+    }
+    if (uploadedCount > 0) {
+      showToast(`Successfully uploaded ${uploadedCount} file(s) with custom metadata and type configurations!`)
     }
     setUploading(false)
+    setTempFiles(null)
     setUploadDescription('')
+    setUploadDocType('')
+    setRelatedSowItemId('')
     setShowUpload(false)
     await fetchDocuments()
   }
@@ -183,12 +297,56 @@ export default function DocumentsModule() {
     await fetchDocuments()
   }
 
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files)
+  function startEdit(doc: Document) {
+    setEditingDoc(doc)
+    setEditDescription(doc.description || '')
+    setEditDocType(doc.document_type || '')
+    setEditRelatedSowItemId(doc.related_sow_item_id || '')
   }
 
-  const filtered = activeCategory === 'all' ? documents : documents.filter(d => d.category === activeCategory)
-  const countByCategory = (key: string) => documents.filter(d => d.category === key).length
+  async function handleSaveEdit() {
+    if (!editingDoc) return
+    setSavingEdit(true)
+    const { error } = await supabase
+      .from('documents')
+      .update({
+        description: editDescription || null,
+        document_type: editDocType || null,
+        related_sow_item_id: editRelatedSowItemId || null,
+        document_category: DOCUMENT_TYPES.find(t => t.value === editDocType)?.category || null
+      })
+      .eq('id', editingDoc.id)
+
+    setSavingEdit(false)
+    if (error) {
+      showToast(`Save failed: ${error.message}`, 'err')
+    } else {
+      showToast('Document updated successfully!')
+      setEditingDoc(null)
+      await fetchDocuments()
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault(); setDragOver(false); handleFileSelect(e.dataTransfer.files)
+  }
+
+  const mapLegacyCategory = (cat: string) => cat === 'master-template' ? 'site-layout-plan' : cat;
+
+  let filtered = activeCategory === 'all' 
+    ? documents 
+    : documents.filter(d => mapLegacyCategory(d.category) === activeCategory)
+
+  if (filterDocType) {
+    filtered = filtered.filter(d => d.document_type === filterDocType)
+  }
+
+  if (filterSowItem) {
+    filtered = filtered.filter(d => d.related_sow_item_id === filterSowItem)
+  }
+
+  const countByCategory = (key: string) => 
+    documents.filter(d => mapLegacyCategory(d.category) === key).length
 
   const bgCol = isDark ? '#0a0c0e' : '#F8FAFC'
   const textCol = isDark ? '#c9d1d9' : '#1e293b'
@@ -289,14 +447,42 @@ export default function DocumentsModule() {
                 onDragOver={e => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}
                 onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                style={{ border: `2px dashed ${dragOver ? '#f59e0b' : '#30363d'}`, borderRadius: 8, padding: '28px 20px', textAlign: 'center' as const, cursor: 'pointer', marginBottom: 14, background: dragOver ? '#f59e0b11' : '#010409', transition: 'all 0.15s' }}
+                onClick={() => { if (!tempFiles) fileInputRef.current?.click() }}
+                style={{ border: `2px dashed ${dragOver ? '#f59e0b' : '#30363d'}`, borderRadius: 8, padding: '24px 20px', textAlign: 'center' as const, cursor: !tempFiles ? 'pointer' : 'default', marginBottom: 14, background: dragOver ? '#f59e0b11' : '#010409', transition: 'all 0.15s' }}
               >
-                <div style={{ fontSize: 22, color: dragOver ? '#f59e0b' : '#30363d', marginBottom: 8 }}>↑</div>
-                <div style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700, marginBottom: 4 }}>{uploading ? 'Uploading...' : 'Drop files here or click to browse'}</div>
-                <div style={{ fontSize: 11, color: '#484f58' }}>PDF, Excel, Word, DWG, images — max 50MB per file</div>
-                <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={e => handleFiles(e.target.files)} />
+                {!tempFiles ? (
+                  <>
+                    <div style={{ fontSize: 22, color: dragOver ? '#f59e0b' : '#30363d', marginBottom: 8 }}>↑</div>
+                    <div style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700, marginBottom: 4 }}>
+                      {uploading ? 'Uploading...' : 'Drop files here or click to browse'}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#484f58' }}>PDF, Excel, Word, DWG, images — max 10MB per file</div>
+                  </>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: 13, color: '#4ade80', fontWeight: 700, marginBottom: 6 }}>
+                      ✓ {tempFiles.length} file(s) selected
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 450, margin: '8px auto', textAlign: 'left' as const }}>
+                      {tempFiles.map((f, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', background: isDark ? '#161b22' : '#f1f5f9', padding: '4px 8px', borderRadius: 4, fontSize: 11 }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>{f.name}</span>
+                          <span style={{ color: subText }}>{formatSize(f.size)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setTempFiles(null); }}
+                      style={{ ...s.btn('g'), marginTop: 8, padding: '4px 10px', fontSize: 10 }}
+                    >
+                      Clear & Choose Different Files
+                    </button>
+                  </div>
+                )}
+                <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={e => handleFileSelect(e.target.files)} />
               </div>
+              
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={s.lbl}>CATEGORY</label>
@@ -309,6 +495,66 @@ export default function DocumentsModule() {
                   <input value={uploadDescription} onChange={e => setUploadDescription(e.target.value)} placeholder="e.g. Rev C — Approved for construction" style={s.inp} />
                 </div>
               </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+                <div>
+                  <label style={s.lbl}>DOCUMENT TYPE</label>
+                  <select value={uploadDocType} onChange={e => setUploadDocType(e.target.value)} style={s.inp}>
+                    <option value="">General / None</option>
+                    {DOCUMENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  {uploadDocType && DOCUMENT_TYPES.find(t => t.value === uploadDocType)?.relation !== 'n-1' ? (
+                    <div>
+                      <label style={s.lbl}>RELATED SOW ITEM (optional)</label>
+                      <select value={relatedSowItemId} onChange={e => setRelatedSowItemId(e.target.value)} style={s.inp}>
+                        <option value="">None</option>
+                        {sowItems.map(item => (
+                          <option key={item.sow_id} value={item.sow_id}>
+                            {item.sow_number} - {item.sub_item_l3 || item.item_l2 || item.scope_l1}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label style={s.lbl}>DOCUMENT CATEGORY</label>
+                      <input 
+                        value={uploadDocType ? (DOCUMENT_TYPES.find(t => t.value === uploadDocType)?.category || '') : 'General'} 
+                        disabled 
+                        style={{ ...s.inp, opacity: 0.7, cursor: 'not-allowed' }} 
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18, borderTop: `1px solid ${borderCol}`, paddingTop: 14 }}>
+                <button
+                  type="button"
+                  style={s.btn('g')}
+                  onClick={() => {
+                    setTempFiles(null)
+                    setUploadDescription('')
+                    setUploadDocType('')
+                    setRelatedSowItemId('')
+                    setShowUpload(false)
+                  }}
+                  disabled={uploading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  style={s.btn('p')}
+                  onClick={handleUploadConfirm}
+                  disabled={uploading || !tempFiles || tempFiles.length === 0}
+                >
+                  {uploading ? 'Uploading...' : 'Confirm & Upload'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -320,12 +566,56 @@ export default function DocumentsModule() {
             </div>
           </div>
 
+          {/* Filters Bar */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16, background: subBorder, padding: '10px 14px', borderRadius: 8, border: `1px solid ${borderCol}`, alignItems: 'center' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: hText, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Filters:</div>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 10, color: subText }}>Type:</span>
+              <select 
+                value={filterDocType} 
+                onChange={e => setFilterDocType(e.target.value)} 
+                style={{ ...s.inp, width: 'auto', minWidth: 160, padding: '4px 8px', fontSize: 11, height: 28 }}
+              >
+                <option value="">All Document Types</option>
+                {DOCUMENT_TYPES.map(t => (
+                  <option key={t.value} value={t.value}>{t.value} - {t.label.replace(` (${t.value})`, '')}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 10, color: subText }}>SOW Link:</span>
+              <select 
+                value={filterSowItem} 
+                onChange={e => setFilterSowItem(e.target.value)} 
+                style={{ ...s.inp, width: 'auto', minWidth: 180, maxWidth: 280, padding: '4px 8px', fontSize: 11, height: 28 }}
+              >
+                <option value="">All SOW Items</option>
+                {sowItems.map(item => (
+                  <option key={item.sow_id} value={item.sow_id}>
+                    {item.sow_number} - {item.sub_item_l3 || item.item_l2 || item.scope_l1}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {(filterDocType || filterSowItem) && (
+              <button 
+                onClick={() => { setFilterDocType(''); setFilterSowItem(''); }} 
+                style={{ ...s.btn('g'), padding: '4px 10px', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4, height: 28 }}
+              >
+                ✕ Clear Filters
+              </button>
+            )}
+          </div>
+
           {loading && <div style={{ color: subText }}>Loading documents...</div>}
 
           {!loading && filtered.length === 0 && (
             <div style={{ textAlign: 'center' as const, padding: '60px 0', color: subText }}>
               <div style={{ fontSize: 13, marginBottom: 8 }}>No files here yet.</div>
-              <div style={{ fontSize: 12, marginBottom: 20 }}>Upload drawings, contracts, specs, reports or photos.</div>
+              <div style={{ fontSize: 12, marginBottom: 20 }}>Upload overall site layout plan, drawings, contracts, specs, reports, photos, etc.</div>
               <button style={s.btn('p')} onClick={() => setShowUpload(true)}>↑ Upload Files</button>
             </div>
           )}
@@ -333,7 +623,8 @@ export default function DocumentsModule() {
           {!loading && filtered.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
               {filtered.map(doc => {
-                const cat = CATEGORIES.find(c => c.key === doc.category)
+                const mappedCatKey = doc.category === 'master-template' ? 'site-layout-plan' : doc.category;
+                const cat = CATEGORIES.find(c => c.key === mappedCatKey)
                 const iconColor = fileIconColor(doc.file_name)
                 const icon = fileIcon(doc.file_name)
                 return (
@@ -350,15 +641,98 @@ export default function DocumentsModule() {
                         </div>
                       </div>
                       {doc.description && <div style={{ fontSize: 11, color: sidebarColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{doc.description}</div>}
-                      <span style={{ fontSize: 10, color: cat?.color || sidebarColor, background: (cat?.color || sidebarColor) + '22', padding: '2px 8px', borderRadius: 4, display: 'inline-block', width: 'fit-content' }}>{cat?.label || doc.category}</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                        <span style={{ fontSize: 10, color: cat?.color || sidebarColor, background: (cat?.color || sidebarColor) + '22', padding: '2px 8px', borderRadius: 4, display: 'inline-block', width: 'fit-content' }}>{cat?.label || doc.category}</span>
+                        {doc.document_type && (
+                          <span style={{ fontSize: 10, color: '#f59e0b', background: '#f59e0b22', padding: '2px 8px', borderRadius: 4, display: 'inline-block', width: 'fit-content', fontWeight: 'bold' }}>
+                            {doc.document_type}
+                          </span>
+                        )}
+                      </div>
+                      {doc.related_sow_item_id && (
+                        <div style={{ fontSize: 10, color: '#60a5fa', background: '#60a5fa11', border: '1px solid #60a5fa22', padding: '4px 6px', borderRadius: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          🔗 SOW: {
+                            sowItems.find(item => item.sow_id === doc.related_sow_item_id)?.sow_number || 'SOW Item'
+                          }
+                        </div>
+                      )}
                       <div style={{ display: 'flex', gap: 6, marginTop: 'auto' as const }}>
                         <button style={{ ...s.btn('p'), flex: 1, fontSize: 10 }} onClick={() => handleDownload(doc)}>↓ Download</button>
+                        <button style={{ ...s.btn('g'), fontSize: 10, padding: '6px 8px' }} onClick={() => startEdit(doc)} title="Edit metadata">✏️</button>
                         <button style={{ ...s.btn('d'), fontSize: 10, opacity: deleting === doc.id ? 0.5 : 1 }} onClick={() => handleDelete(doc)} disabled={deleting === doc.id}>{deleting === doc.id ? '...' : '✕'}</button>
                       </div>
                     </div>
                   </div>
                 )
               })}
+            </div>
+          )}
+          {/* EDIT MODAL OVERLAY */}
+          {editingDoc && (
+            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+              <div style={{ ...s.card, width: '100%', maxWidth: 500, background: cardBg, border: '1px solid ' + borderCol, boxShadow: '0 10px 25px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid ' + borderCol, paddingBottom: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: hText }}>Edit Document Properties</div>
+                  <button onClick={() => setEditingDoc(null)} style={{ background: 'transparent', border: 'none', color: subText, cursor: 'pointer', fontSize: 16 }}>✕</button>
+                </div>
+
+                <div style={{ fontSize: 11, color: subText, fontFamily: 'monospace', background: subBorder, padding: '6px 10px', borderRadius: 4, wordBreak: 'break-all' }}>
+                  File: <strong style={{ color: textCol }}>{editingDoc.file_name}</strong>
+                </div>
+
+                <div>
+                  <label style={s.lbl}>DESCRIPTION (optional)</label>
+                  <textarea 
+                    value={editDescription} 
+                    onChange={e => setEditDescription(e.target.value)} 
+                    placeholder="Enter document description..." 
+                    style={{ ...s.inp, height: 60, resize: 'none', fontFamily: 'monospace' }} 
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={s.lbl}>DOCUMENT TYPE</label>
+                    <select value={editDocType} onChange={e => setEditDocType(e.target.value)} style={s.inp}>
+                      <option value="">General / None</option>
+                      {DOCUMENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    {editDocType && DOCUMENT_TYPES.find(t => t.value === editDocType)?.relation !== 'n-1' ? (
+                      <div>
+                        <label style={s.lbl}>RELATED SOW ITEM</label>
+                        <select value={editRelatedSowItemId} onChange={e => setEditRelatedSowItemId(e.target.value)} style={s.inp}>
+                          <option value="">None</option>
+                          {sowItems.map(item => (
+                            <option key={item.sow_id} value={item.sow_id}>
+                              {item.sow_number} - {item.sub_item_l3 || item.item_l2 || item.scope_l1}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label style={s.lbl}>DOCUMENT CATEGORY</label>
+                        <input 
+                          value={editDocType ? (DOCUMENT_TYPES.find(t => t.value === editDocType)?.category || '') : 'General'} 
+                          disabled 
+                          style={{ ...s.inp, opacity: 0.7, cursor: 'not-allowed' }} 
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10, borderTop: '1px solid ' + borderCol, paddingTop: 12 }}>
+                  <button onClick={() => setEditingDoc(null)} style={s.btn('g')} disabled={savingEdit}>
+                    Cancel
+                  </button>
+                  <button onClick={handleSaveEdit} style={s.btn('p')} disabled={savingEdit}>
+                    {savingEdit ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

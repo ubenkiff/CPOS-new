@@ -182,29 +182,56 @@ export default function ChatWidget() {
 
   useEffect(() => {
     let cancelled = false
-    async function loadUser() {
-      const { data } = await supabase.auth.getUser()
-      if (cancelled) return
-      const user = data?.user
-      if (!user) {
-        setAuthed(false)
-        return
+
+    // Listen to token refresh failure events globally
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event) => {
+      if ((event as any) === 'TOKEN_REFRESH_FAILED') {
+        console.warn('Refresh token failed/expired handled by ChatWidget, clearing local state')
+        try {
+          await supabase.auth.signOut({ scope: 'local' })
+        } catch (_) {}
+        if (!cancelled) setAuthed(false)
       }
+    })
 
-      setAuthed(true)
-      const fullName = safeText((user.user_metadata as any)?.full_name)
-      const email = safeText(user.email)
+    async function loadUser() {
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (error) {
+          console.warn('User load error in ChatWidget, checking if local cleanup is needed:', error)
+          if (error.status === 400 || error.status === 429 || error.message?.includes('Refresh Token')) {
+            console.warn('Automatically clearing local invalid auth session in ChatWidget')
+            await supabase.auth.signOut({ scope: 'local' })
+          }
+          if (cancelled) return
+          setAuthed(false)
+          return
+        }
+        if (cancelled) return
+        const user = data?.user
+        if (!user) {
+          setAuthed(false)
+          return
+        }
 
-      setContact((c) => ({
-        ...c,
-        name: c.name || fullName,
-        email: c.email || email,
-      }))
+        setAuthed(true)
+        const fullName = safeText((user.user_metadata as any)?.full_name)
+        const email = safeText(user.email)
+
+        setContact((c) => ({
+          ...c,
+          name: c.name || fullName,
+          email: c.email || email,
+        }))
+      } catch (err) {
+        console.error('Failed to resolve auth session inside ChatWidget:', err)
+      }
     }
 
     loadUser()
     return () => {
       cancelled = true
+      subscription?.unsubscribe()
     }
   }, [])
 

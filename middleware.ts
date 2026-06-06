@@ -53,7 +53,12 @@ export async function middleware(request: NextRequest) {
 
   // Not logged in — redirect to login
   if (!user) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    const redirectResponse = NextResponse.redirect(new URL('/login', request.url))
+    // Copy headers (which includes Set-Cookie headers) from response to redirectResponse
+    response.headers.forEach((value, key) => {
+      redirectResponse.headers.set(key, value)
+    })
+    return redirectResponse
   }
 
   return response

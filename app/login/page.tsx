@@ -29,6 +29,43 @@ function LoginForm() {
   const registered = searchParams.get('registered')
   const emailFromQuery = searchParams.get('email')
 
+  // Automatically redirect if user already has an active session
+  useEffect(() => {
+    // Listen for global token refresh failures to clean up locally
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event) => {
+      if ((event as any) === 'TOKEN_REFRESH_FAILED') {
+        console.warn('Refresh token failed/expired on login page, clearing local session')
+        try {
+          await supabase.auth.signOut({ scope: 'local' })
+        } catch (_) {}
+      }
+    })
+
+    async function checkExistingSession() {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser()
+        if (error) {
+          console.warn('Invalid or rate-limited session detected on login page, clearing locally:', error)
+          await supabase.auth.signOut({ scope: 'local' })
+          return
+        }
+        if (user) {
+          router.push(safeNextPath(searchParams.get('next')))
+        }
+      } catch (err) {
+        console.error('Error checking active session:', err)
+        try {
+          await supabase.auth.signOut({ scope: 'local' })
+        } catch (_) {}
+      }
+    }
+    checkExistingSession()
+
+    return () => {
+      subscription?.unsubscribe()
+    }
+  }, [router, searchParams])
+
   useEffect(() => {
     if (emailFromQuery) {
       try {
