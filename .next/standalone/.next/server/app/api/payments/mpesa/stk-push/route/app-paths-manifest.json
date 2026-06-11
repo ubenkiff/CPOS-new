@@ -1,0 +1,3 @@
+{
+  "/api/payments/mpesa/stk-push/route": "app/api/payments/mpesa/stk-push/route.js"
+}

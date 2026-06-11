@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx'
 import { useTheme } from '../../../../lib/theme'
 import ThemeSelector from '../../../../components/ThemeSelector'
 import { parseXERToSow, parseMSPXmlToSow, parseCSVToSow, ParsedSowItem } from '../../../../lib/schedulerParser'
+import { QRCodeSVG } from 'qrcode.react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -587,6 +588,7 @@ export default function SowPage() {
             {row.drawing_ids!.map((drawingId) => {
               const filePath = getDrawingFilePath(row, drawingId);
               const noteVal = row.drawing_notes?.[drawingId] || '';
+              const qrUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/drawing-lookup/${drawingId}`;
               return (
                 <div key={drawingId} style={{ display: 'flex', alignItems: 'center', gap: 8, background: isDark ? '#161b22' : '#f8fafc', padding: '6px 10px', borderRadius: 6, border: '1px solid ' + (isDark ? '#21262d' : '#cbd5e1') }}>
                   <a
@@ -633,6 +635,17 @@ export default function SowPage() {
                         textCol={textCol}
                       />
                     </div>
+                  </div>
+                  
+                  {/* QR Code for print view */}
+                  <div className="print-only" style={{ display: 'none' }}>
+                    <QRCodeSVG
+                      value={qrUrl}
+                      size={32}
+                      level="L"
+                      includeMargin={false}
+                      style={{ display: 'block' }}
+                    />
                   </div>
                   
                   <button
@@ -1361,6 +1374,9 @@ export default function SowPage() {
           }
           .sow-topbar, .sow-kpis, .sow-status, .sow-form, button, label, .print-hide, .btn, select, a:not([href]) {
             display: none !important;
+          }
+          .print-only {
+            display: block !important;
           }
           .sow-content {
             padding: 0 !important;
