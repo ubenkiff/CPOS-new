@@ -80,7 +80,28 @@ The `sow_items` table includes:
 
 ---
 
-## 4. Readying for Production Export & Syncing to GitHub
+## 4. SOW Batch Timeline Shifting
+
+The **SOW Batch Timeline Shifter** is a highly powerful and precise utility located directly in the Scope of Work workspace top menu bar.
+
+### Custom Features
+1. **Dynamic Target Selection:**
+   * **Project-wide Shift:** Instantly shifts all timeline events for every item across the entire Scope of Work.
+   * **Sectional Level 1 Shift:** Allows users to focus exclusively on a specific high-level section (and all of its child rows), making phase rescheduling incredibly simple.
+2. **Selective Date Field Rescheduling:**
+   * Offers distinct shifting targeting:
+     * **Planned Timelines:** Reschedules `planned_start` and `planned_end`.
+     * **Baseline Timelines:** Reschedules `baseline_start` and `baseline_end` to preserve initial targets.
+     * **Actual Timelines:** Adjusts actual field progress trackers.
+     * **All Set Dates:** Adjusts all fields collectively by the specified offset.
+3. **Flexible Offsets & Calendar Conversion:**
+   * Supports positive (forward in time) or negative (backward in time) offsets.
+   * Allows shifting seamlessly by **Days**, **Weeks**, or **Calendar Months** (using correct month calendar boundaries).
+   * **Architectural Preservation:** Shifting applies the offset directly to both the start and end date variables of each row, preserving task durations and critical path dependencies.
+
+---
+
+## 5. Readying for Production Export & Syncing to GitHub
 
 As an AI Studio runtime application, you are fully formatted to be exported to any outside system in just a few clicks.
 
@@ -97,14 +118,14 @@ As an AI Studio runtime application, you are fully formatted to be exported to a
 
 ---
 
-## 5. Deployment Guide (Cloud Run / Vercel)
+## 6. Deployment Guide (Cloud Run / Vercel)
 
 Once exported, you can host the application on your preferred cloud infrastructure:
 
 ### Option A: Deployment onto Vercel (Fastest)
 1.  Log in to [Vercel](https://vercel.com) and click **Add New Project**.
 2.  Select your exported GitHub repository.
-3.  Configure your **Environment Variables** (see Section 6 below).
+3.  Configure your **Environment Variables** (see Section 7 below).
 4.  Vercel automatically detects Next.js, configures the build script (`npm run build`), and yields a global production-ready URL.
 
 ### Option B: Deployment onto Docker / GCP Cloud Run (Enterprise-Ready)
@@ -124,7 +145,7 @@ Once exported, you can host the application on your preferred cloud infrastructu
 
 ---
 
-## 6. Required Production Environment Variables
+## 7. Required Production Environment Variables
 
 Make sure to populate these settings under your deployment settings (or inside `.env` locally):
 
@@ -146,4 +167,5 @@ Make sure to populate these settings under your deployment settings (or inside `
 *   [x] Automated redirect checks cleared on login.
 *   [x] All sub-modules (BOQ, SOW, Gantt, Reports, documents) vetted.
 *   [x] Workspace Drawing Manager verified successfully.
+*   [x] Batch Scope Timeline Shifter utility integrated successfully.
 *   [x] Compiles and builds successfully (`npm run build` is 100% green).

@@ -243,6 +243,16 @@ export default function SowPage() {
   const [drawingsBasePath, setDrawingsBasePath] = useState('')
   const [documents, setDocuments] = useState<any[]>([])
 
+  // ── SOW Timeline Shifting states ──────────────────────────────────────────
+  const [showShiftModal, setShowShiftModal] = useState(false)
+  const [shiftScope, setShiftScope] = useState<'all' | 'l1'>('all')
+  const [shiftL1Id, setShiftL1Id] = useState<string>('')
+  const [shiftField, setShiftField] = useState<'planned' | 'baseline' | 'actual' | 'all-dates'>('planned')
+  const [shiftAmount, setShiftAmount] = useState<number>(0)
+  const [shiftUnit, setShiftUnit] = useState<'days' | 'weeks' | 'months'>('days')
+  const [shifting, setShifting] = useState(false)
+  const [shiftSuccess, setShiftSuccess] = useState('')
+
   async function handleDownloadDoc(doc: any) {
     const { data, error } = await supabase.storage.from('cpos-documents').createSignedUrl(doc.file_path, 60)
     if (error || !data?.signedUrl) { 
@@ -1291,6 +1301,122 @@ export default function SowPage() {
     load()
   }
 
+  async function handleShiftTimelines() {
+    if (isPublicViewOnly) {
+      setError('This is a public read-only demo project. Editing is disabled.')
+      return
+    }
+    if (shiftAmount === 0) {
+      setError('Please specify a positive or negative amount to shift.')
+      return
+    }
+    
+    setShifting(true)
+    setError('')
+    setShiftSuccess('')
+
+    try {
+      // Find matches
+      let targetItems = [...items]
+      if (shiftScope === 'l1') {
+        const l1Item = items.find(i => i.sow_id === shiftL1Id)
+        if (!l1Item) {
+          setError('Specified Level 1 section was not found.')
+          setShifting(false)
+          return
+        }
+        const prefix = l1Item.sow_number + '.'
+        targetItems = items.filter(
+          item => item.sow_id === l1Item.sow_id || item.sow_number.startsWith(prefix)
+        )
+      }
+
+      const updatedCount = targetItems.length
+      if (updatedCount === 0) {
+        setError('No items matched the specified scope.')
+        setShifting(false)
+        return
+      }
+
+      // Helper function inside scope
+      function shiftDateValue(dateStr: string | undefined): string | undefined {
+        if (!dateStr || !shiftAmount) return dateStr
+        const d = new Date(dateStr)
+        if (isNaN(d.getTime())) return dateStr
+        if (shiftUnit === 'days') {
+          d.setDate(d.getDate() + shiftAmount)
+        } else if (shiftUnit === 'weeks') {
+          d.setDate(d.getDate() + shiftAmount * 7)
+        } else if (shiftUnit === 'months') {
+          d.setMonth(d.getMonth() + shiftAmount)
+        }
+        return d.toISOString().split('T')[0]
+      }
+
+      const updates: Promise<any>[] = []
+
+      for (const item of targetItems) {
+        const payload: Partial<SowItem> = {}
+        let changed = false
+
+        if (shiftField === 'planned' || shiftField === 'all-dates') {
+          const newStart = shiftDateValue(item.planned_start)
+          const newEnd = shiftDateValue(item.planned_end)
+          if (newStart !== item.planned_start || newEnd !== item.planned_end) {
+            payload.planned_start = newStart || null as any
+            payload.planned_end = newEnd || null as any
+            changed = true
+          }
+        }
+
+        if (shiftField === 'baseline' || shiftField === 'all-dates') {
+          const newStart = shiftDateValue(item.baseline_start)
+          const newEnd = shiftDateValue(item.baseline_end)
+          if (newStart !== item.baseline_start || newEnd !== item.baseline_end) {
+            payload.baseline_start = newStart || null as any
+            payload.baseline_end = newEnd || null as any
+            changed = true
+          }
+        }
+
+        if (shiftField === 'actual' || shiftField === 'all-dates') {
+          const newStart = shiftDateValue(item.actual_start)
+          const newEnd = shiftDateValue(item.actual_end)
+          if (newStart !== item.actual_start || newEnd !== item.actual_end) {
+            payload.actual_start = newStart || null as any
+            payload.actual_end = newEnd || null as any
+            changed = true
+          }
+        }
+
+        if (changed) {
+          updates.push(
+            supabase.from('sow_items').update(payload).eq('sow_id', item.sow_id) as any
+          )
+        }
+      }
+
+      if (updates.length > 0) {
+        const results = await Promise.all(updates)
+        const failed = results.filter(r => r.error)
+        if (failed.length > 0) {
+          console.error('Some updates failed:', failed.map(f => f.error?.message).join(', '))
+          setError(`Shifted with issues. ${failed.length} items failed to save. Please review logs.`)
+        } else {
+          setShiftSuccess(`Successfully shifted timelines for ${updates.length} item(s) by ${shiftAmount} ${shiftUnit}.`)
+        }
+      } else {
+        setShiftSuccess('No dates were changed because none were set on the targeted items.')
+      }
+
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred shifting timelines')
+    } finally {
+      setShifting(false)
+    }
+  }
+
   function toggleCollapse(key: string) {
     setCollapsed(c => ({ ...c, [key]: !c[key] }))
   }
@@ -1472,6 +1598,20 @@ export default function SowPage() {
             style={{ fontSize: '12px', opacity: isPublicViewOnly || importing ? 0.5 : 1, border: '1px solid #BA7517', color: '#BA7517', cursor: isPublicViewOnly || importing ? 'not-allowed' : 'pointer' }}
           >
             📊 Scheduler Integration (P6 / MSP / CSV)
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              if (isPublicViewOnly) {
+                setError('This is a public read-only demo project. Timeline shifting is disabled.')
+                return
+              }
+              setShowShiftModal(true)
+            }}
+            disabled={isPublicViewOnly}
+            style={{ fontSize: '12px', opacity: isPublicViewOnly ? 0.5 : 1, border: '1px solid #10b981', color: '#10b981', cursor: isPublicViewOnly ? 'not-allowed' : 'pointer' }}
+          >
+            ⏰ Shift Timelines
           </button>
           <button
             className="btn btn-primary"
@@ -2787,6 +2927,165 @@ export default function SowPage() {
       {/* Overlay when form is open */}
       {showForm && (
         <div onClick={closeForm} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 29 }} />
+      )}
+
+      {/* ── BATCH TIMELINE SHIFT MODAL ── */}
+      {showShiftModal && (
+        <div className="fade-in" style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          {/* Backdrop */}
+          <div onClick={() => !shifting && setShowShiftModal(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(3px)' }} />
+          
+          {/* Modal Container */}
+          <div className="card" style={{ position: 'relative', width: '100%', maxWidth: 500, maxHeight: '90vh', background: isDark ? '#0d1117' : '#ffffff', border: '1px solid ' + (isDark ? '#21262d' : '#cbd5e1'), borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 101, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}>
+            
+            {/* Header */}
+            <div style={{ padding: '18px 24px', borderBottom: '1px solid ' + (isDark ? '#21262d' : '#cbd5e1'), display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 20, fontWeight: 700, color: hText, letterSpacing: '0.05em', margin: 0 }}>
+                  ⏰ BATCH TIMELINE SHIFT UTILITY
+                </h3>
+                <p style={{ fontSize: 11, color: subText, margin: '4px 0 0 0' }}>
+                  Shift schedule dates across the entire SOW or targeted Level 1 sections seamlessly.
+                </p>
+              </div>
+              <button 
+                className="btn" 
+                onClick={() => { setShowShiftModal(false); setShiftSuccess(''); setError(''); }}
+                disabled={shifting}
+                style={{ fontSize: 12, padding: '4px 8px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content */}
+            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+              {error && (
+                <div style={{ padding: '10px 14px', background: isDark ? '#f851491a' : '#fef2f2', border: '1px solid ' + (isDark ? '#f851494d' : '#fca5a5'), borderRadius: 6, color: '#f87171', fontSize: 11 }}>
+                  ⚠️ {error}
+                </div>
+              )}
+
+              {shiftSuccess && (
+                <div style={{ padding: '10px 14px', background: isDark ? '#2386361a' : '#f0fdf4', border: '1px solid ' + (isDark ? '#2386364d' : '#bbf7d0'), borderRadius: 6, color: '#4ade80', fontSize: 11 }}>
+                  ✅ {shiftSuccess}
+                </div>
+              )}
+
+              {/* Scope selection */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: textCol, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Target Scope</label>
+                <select 
+                  className="fi" 
+                  value={shiftScope} 
+                  onChange={e => {
+                    setShiftScope(e.target.value as any)
+                    if (e.target.value === 'l1' && items.length > 0) {
+                      const firstL1 = items.find(i => i.hierarchy_level === 1)
+                      if (firstL1) setShiftL1Id(firstL1.sow_id)
+                    }
+                  }}
+                  style={{ width: '100%', padding: '8px 12px', background: isDark ? '#0d1117' : '#ffffff', border: '1px solid ' + (isDark ? '#30363d' : '#cbd5e1'), borderRadius: 6, color: textCol }}
+                >
+                  <option value="all">Entire SOW / Project</option>
+                  <option value="l1">Target Specific SOW section (Level 1)</option>
+                </select>
+              </div>
+
+              {/* L1 Dropdown if scope is L1 */}
+              {shiftScope === 'l1' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: textCol, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Select Level 1 SOW Section</label>
+                  <select 
+                    className="fi" 
+                    value={shiftL1Id} 
+                    onChange={e => setShiftL1Id(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', background: isDark ? '#0d1117' : '#ffffff', border: '1px solid ' + (isDark ? '#30363d' : '#cbd5e1'), borderRadius: 6, color: textCol }}
+                  >
+                    {items.filter(i => i.hierarchy_level === 1).map(l1 => (
+                      <option key={l1.sow_id} value={l1.sow_id}>
+                        {l1.sow_number} {l1.scope_l1 || l1.item_l2 || 'Untitled Section'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Shift Field Selector */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: textCol, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Target Date Type</label>
+                <select 
+                  className="fi" 
+                  value={shiftField} 
+                  onChange={e => setShiftField(e.target.value as any)}
+                  style={{ width: '100%', padding: '8px 12px', background: isDark ? '#0d1117' : '#ffffff', border: '1px solid ' + (isDark ? '#30363d' : '#cbd5e1'), borderRadius: 6, color: textCol }}
+                >
+                  <option value="planned">Planned Timelines (Starts & Ends)</option>
+                  <option value="baseline">Baseline Timelines (Starts & Ends)</option>
+                  <option value="actual">Actual Timelines (Starts & Ends)</option>
+                  <option value="all-dates">All Set Dates (Planned, Baseline & Actual)</option>
+                </select>
+              </div>
+
+              {/* Numeric Shift Input and Unit */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: textCol, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Offset Amount</label>
+                  <input 
+                    type="number" 
+                    className="fi" 
+                    placeholder="e.g. 5 or -10" 
+                    value={shiftAmount || ''} 
+                    onChange={e => setShiftAmount(parseInt(e.target.value) || 0)}
+                    style={{ width: '100%', padding: '8px 12px', background: isDark ? '#0d1117' : '#ffffff', border: '1px solid ' + (isDark ? '#30363d' : '#cbd5e1'), borderRadius: 6, color: textCol }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: textCol, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Unit of Time</label>
+                  <select 
+                    className="fi" 
+                    value={shiftUnit} 
+                    onChange={e => setShiftUnit(e.target.value as any)}
+                    style={{ width: '100%', padding: '8px 12px', background: isDark ? '#0d1117' : '#ffffff', border: '1px solid ' + (isDark ? '#30363d' : '#cbd5e1'), borderRadius: 6, color: textCol }}
+                  >
+                    <option value="days">Days</option>
+                    <option value="weeks">Weeks</option>
+                    <option value="months">Months</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ fontSize: 11, color: subText, background: isDark ? '#161b22' : '#f1f5f9', padding: '10px 12px', borderRadius: 6, border: '1px solid ' + (isDark ? '#21262d' : '#e2e8f0'), display: 'flex', gap: 7, alignItems: 'flex-start' }}>
+                <span style={{ fontSize: 14 }}>💡</span>
+                <span>
+                  Positive offsets shift dates forward in time; negative offsets shift dates backward. This operation preserves schedule durations and dependencies flawlessly.
+                </span>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '14px 24px', borderTop: '1px solid ' + (isDark ? '#21262d' : '#cbd5e1'), display: 'flex', justifyContent: 'flex-end', gap: 12, background: isDark ? '#0a0c0e' : '#f8fafc' }}>
+              <button 
+                type="button" 
+                className="btn" 
+                onClick={() => { setShowShiftModal(false); setShiftSuccess(''); setError(''); }}
+                disabled={shifting}
+                style={{ fontSize: 12 }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-primary" 
+                onClick={handleShiftTimelines}
+                disabled={shifting || shiftAmount === 0}
+                style={{ fontSize: 12, background: '#10b981', borderColor: '#10b981' }}
+              >
+                {shifting ? 'Shifting Timelines...' : 'Apply Timeline Shift'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── PRIMAVERA & MS PROJECT INTEGRATION CENTER MODAL ── */}
