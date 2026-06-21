@@ -10,6 +10,7 @@ import {
   AlertCircle, CheckCircle2, ChevronLeft, ChevronRight 
 } from "lucide-react";
 import { FALLBACK_POSTS, WPPost, WordPressConnectionStatus, getCategoryBadgeStyles } from "../lib/wordpress";
+import AdvertisingModule from "../components/AdvertisingModule";
 
 const PUBLIC_VIEWONLY_PROJECT_ID = "e03418fd-0ef2-4080-90c6-f18009bb12d1";
 
@@ -273,6 +274,13 @@ export default function Home() {
         </div>
       </section>
 
+      {/* CPOS Industry Ecosystem & Partner Platforms */}
+      <section className="py-24 border-t border-slate-100 bg-slate-50/20">
+        <div className="max-w-7xl mx-auto px-6">
+          <AdvertisingModule isDark={false} />
+        </div>
+      </section>
+
       {/* Stats Section / Partner Grid */}
       <section className="bg-slate-900 py-24 relative overflow-hidden">
         <div className="max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-20 items-center">
@@ -531,6 +539,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+
 
       {/* Footer */}
       <footer className="bg-slate-900 border-t border-white/5 pt-24 pb-12">

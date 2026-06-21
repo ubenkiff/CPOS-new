@@ -7,7 +7,7 @@ import * as XLSX from 'xlsx'
 import { useTheme } from '../../../../lib/theme'
 import ThemeSelector from '../../../../components/ThemeSelector'
 import { parseXERToSow, parseMSPXmlToSow, parseCSVToSow, ParsedSowItem } from '../../../../lib/schedulerParser'
-import { QRCodeSVG } from 'qrcode.react'
+import ActivityLogModal from '../../../../components/ActivityLogModal'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -230,6 +230,10 @@ export default function SowPage() {
   const [showFullSowTree, setShowFullSowTree] = useState(false)
   const [drawingSubMode, setDrawingSubMode] = useState<'items' | 'compiled'>('items')
   const [expandedDrawings, setExpandedDrawings] = useState<Record<string, boolean>>({})
+
+  // ── SOW Activity Log states ───────────────────────────────────────────────
+  const [showLogModal, setShowLogModal] = useState(false)
+  const [selectedSowForLog, setSelectedSowForLog] = useState<SowItem | null>(null)
 
   // ── Primavera & MS Project integration state hooks ────────────────────────
   const [showIntegration, setShowIntegration] = useState(false)
@@ -598,7 +602,6 @@ export default function SowPage() {
             {row.drawing_ids!.map((drawingId) => {
               const filePath = getDrawingFilePath(row, drawingId);
               const noteVal = row.drawing_notes?.[drawingId] || '';
-              const qrUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/drawing-lookup/${drawingId}`;
               return (
                 <div key={drawingId} style={{ display: 'flex', alignItems: 'center', gap: 8, background: isDark ? '#161b22' : '#f8fafc', padding: '6px 10px', borderRadius: 6, border: '1px solid ' + (isDark ? '#21262d' : '#cbd5e1') }}>
                   <a
@@ -645,17 +648,6 @@ export default function SowPage() {
                         textCol={textCol}
                       />
                     </div>
-                  </div>
-                  
-                  {/* QR Code for print view */}
-                  <div className="print-only" style={{ display: 'none' }}>
-                    <QRCodeSVG
-                      value={qrUrl}
-                      size={32}
-                      level="L"
-                      includeMargin={false}
-                      style={{ display: 'block' }}
-                    />
                   </div>
                   
                   <button
@@ -1500,9 +1492,6 @@ export default function SowPage() {
           }
           .sow-topbar, .sow-kpis, .sow-status, .sow-form, button, label, .print-hide, .btn, select, a:not([href]) {
             display: none !important;
-          }
-          .print-only {
-            display: block !important;
           }
           .sow-content {
             padding: 0 !important;
@@ -2373,6 +2362,7 @@ export default function SowPage() {
                               <span style={{ color: pct === 100 ? '#4ade80' : textCol, fontWeight: 600 }}>{pct}%</span>
                               <span style={{ color: row.is_critical_path ? '#f87171' : subText, fontSize: 10 }}>{row.is_critical_path ? '⚑ YES' : 'No'}</span>
                               <div style={{ display: 'flex', gap: 4 }}>
+                                <button className="btn" onClick={() => { setSelectedSowForLog(row); setShowLogModal(true) }} style={{ fontSize: 10, padding: '3px 7px', color: '#f59e0b', borderColor: '#f59e0b55' }} title="Log Activity Entry">⚡ Log</button>
                                 <button className="btn" onClick={() => openEdit(row)} style={{ fontSize: 10, padding: '3px 7px' }}>Edit</button>
                                 <button className="btn btn-danger" onClick={() => handleDelete(row)} style={{ fontSize: 10, padding: '3px 7px' }}>✕</button>
                               </div>
@@ -2600,6 +2590,7 @@ export default function SowPage() {
               <span style={{ color: textCol, fontWeight: 600 }}>{pct}%</span>
               <span style={{ color: row.is_critical_path ? '#f87171' : subText, fontSize: 10 }}>{row.is_critical_path ? '⚑' : '—'}</span>
               <div style={{ display: 'flex', gap: 4 }}>
+                <button className="btn" onClick={() => { setSelectedSowForLog(row); setShowLogModal(true) }} style={{ fontSize: 10, padding: '3px 7px', color: '#f59e0b', borderColor: '#f59e0b55' }} title="Log Activity Entry">⚡ Log</button>
                 <button className="btn" onClick={() => openEdit(row)} style={{ fontSize: 10, padding: '3px 7px' }}>Edit</button>
                 <button className="btn btn-danger" onClick={() => handleDelete(row)} style={{ fontSize: 10, padding: '3px 7px' }}>✕</button>
               </div>
@@ -3341,6 +3332,17 @@ export default function SowPage() {
 
           </div>
         </div>
+      )}
+
+      {showLogModal && selectedSowForLog && (
+        <ActivityLogModal
+          isOpen={showLogModal}
+          onClose={() => { setShowLogModal(false); setSelectedSowForLog(null) }}
+          sowItem={selectedSowForLog}
+          projectCurrency={project?.currency || 'KES'}
+          isDark={isDark}
+          onSave={load}
+        />
       )}
     </div>
   )

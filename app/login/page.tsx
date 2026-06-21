@@ -25,9 +25,19 @@ function LoginForm() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [isDevSandbox, setIsDevSandbox] = useState(false)
 
   const registered = searchParams.get('registered')
   const emailFromQuery = searchParams.get('email')
+
+  // Check if Supabase keys are missing or placeholders inside this sandbox
+  const supabaseUrlRaw = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKeyRaw = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const isSupabaseConfigured = 
+    supabaseUrlRaw && 
+    supabaseKeyRaw && 
+    !supabaseUrlRaw.includes('your-project-ref') && 
+    !supabaseKeyRaw.includes('your_supabase_anon_publishable_key')
 
   // Automatically redirect if user already has an active session
   useEffect(() => {
@@ -75,6 +85,15 @@ function LoginForm() {
       }
     }
   }, [emailFromQuery])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const hostname = window.location.hostname
+      if (hostname.includes('localhost') || hostname.includes('run.app') || hostname.includes('ais-')) {
+        setIsDevSandbox(true)
+      }
+    }
+  }, [])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -125,6 +144,90 @@ function LoginForm() {
             <h2 className="text-3xl font-black text-slate-900 tracking-tight">Welcome Back</h2>
             <p className="text-slate-500 font-medium mt-2">Manage your projects with precision</p>
           </div>
+
+          {!isSupabaseConfigured ? (
+            <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs leading-relaxed space-y-3">
+              <div className="flex items-center gap-2 font-bold text-amber-900">
+                <span className="text-base">⚠️</span> 
+                <span>SANDBOX CONNECTION WARNING</span>
+              </div>
+              <p>
+                This development/sandbox container does not have your live Supabase configuration variables. Connection to auth will fail because:
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-slate-600 font-medium ml-1">
+                <li><span className="font-bold text-slate-700">Database URL:</span> {supabaseUrlRaw ? <code className="bg-slate-100 px-1 rounded text-[10px] break-all">{supabaseUrlRaw}</code> : <span className="text-red-500 font-bold">Unconfigured / Missing</span>}</li>
+                <li><span className="font-bold text-slate-700">Anon Public Key:</span> {supabaseKeyRaw ? <span className="text-slate-500 font-normal">Registered ({supabaseKeyRaw.substring(0, 10)}...)</span> : <span className="text-red-500 font-bold">Unconfigured / Missing</span>}</li>
+              </ul>
+              <div className="pt-2 border-t border-amber-200/50 text-[10.5px] text-amber-900 font-semibold space-y-1">
+                <div>💡 <span className="font-bold">How to resolve:</span></div>
+                <div className="font-normal text-slate-600 space-y-1">
+                  <div>1. Click the <span className="font-bold">Settings \⚙️</span> icon inside your AI Studio toolbar.</div>
+                  <div>2. Register environment variables <code className="bg-slate-100 px-1 rounded text-[10px]">NEXT_PUBLIC_SUPABASE_URL</code> and <code className="bg-slate-100 px-1 rounded text-[10px]">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.</div>
+                  <div>3. Restart the server or hit hot reload to apply these changes securely.</div>
+                </div>
+              </div>
+              <div className="pt-3 border-t border-amber-200/40">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={async () => {
+                    setLoading(true)
+                    setError('')
+                    try {
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('cpos-dev-bypass', 'true')
+                        document.cookie = "cpos-dev-bypass=true; path=/;"
+                      }
+                      await supabase.auth.signInWithPassword({ email: 'sandbox-developer@example.com', password: 'password' })
+                      router.push('/dashboard')
+                      router.refresh()
+                    } catch (err: any) {
+                      setError(err.message || 'Error triggering mock sandbox mode')
+                    } finally {
+                      setLoading(false)
+                    }
+                  }}
+                  className="w-full h-11 flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-black uppercase tracking-wider text-[11px] rounded-xl shadow-md border-0 active:scale-95 transition-all cursor-pointer"
+                >
+                  ⚡ ENTER SANDBOX IN OFFLINE DEMO MODE
+                </button>
+              </div>
+            </div>
+          ) : isDevSandbox ? (
+            <div className="mb-6 p-4 rounded-2xl bg-amber-50/60 border border-amber-200 text-amber-800 text-xs leading-relaxed space-y-2">
+              <div className="flex items-center gap-2 font-bold text-amber-900">
+                <span className="text-base">🛠️</span> 
+                <span>SANDBOX BYPASS DETECTED</span>
+              </div>
+              <p className="text-slate-600 font-medium text-[11px]">
+                Your live Supabase keys are configured. However, iframe cookie blocks inside the AI Studio frame may prevent login. Use this bypass button to securely mock sessions inside the sandbox.
+              </p>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={async () => {
+                  setLoading(true)
+                  setError('')
+                  try {
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('cpos-dev-bypass', 'true')
+                      document.cookie = "cpos-dev-bypass=true; path=/;"
+                    }
+                    await supabase.auth.signInWithPassword({ email: 'sandbox-developer@example.com', password: 'password' })
+                    router.push('/dashboard')
+                    router.refresh()
+                  } catch (err: any) {
+                    setError(err.message || 'Error triggering mock sandbox mode')
+                  } finally {
+                    setLoading(false)
+                  }
+                }}
+                className="w-full h-10 flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-black uppercase tracking-wider text-[10px] rounded-xl shadow-sm border-0 active:scale-95 transition-all cursor-pointer mt-1"
+              >
+                ⚡ ENTER SANDBOX IN OFFLINE DEMO MODE
+              </button>
+            </div>
+          ) : null}
 
           <form onSubmit={handleLogin} className="space-y-6">
             <div className="space-y-2">

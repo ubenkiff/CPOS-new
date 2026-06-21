@@ -55,29 +55,6 @@ The **Construction Drawing Log & SOW Linkage Manifest** is fully integrated with
     *   *Submode 1 - SOW linkage pane:* Lets field personnel review corresponding drawings alongside the itemized scope line-by-line.
     *   *Submode 2 - Consolidated Master Register:* Provides a compiled system-wide list of all referenced drawings across the entire project, searchable by drawing ID or note parameters.
 
-### Drawing Linkage Features
-- **Folder Selection:** Users can select a folder of drawing files, and the system automatically extracts drawing numbers from filenames using regex patterns (e.g., "A-101 Floor Plan.pdf" → "A-101").
-- **Manual Entry:** Fallback for manual drawing number entry when automatic extraction is not feasible.
-- **Drawing Badges:** Display linked drawings as clickable badges in the SOW row.
-- **Drawing Notes:** Inline editing of drawing notes for each linked drawing.
-- **Print QR Codes:** When printing the SOW report, each drawing badge displays a QR code that links to a web-based drawing lookup page.
-
-### Drawing Lookup Web App
-- **Route:** `/drawing-lookup/[drawingId]`
-- **Purpose:** Allows team members to access drawings from printed PDF reports.
-- **Workflow:**
-  1. User scans QR code from printed SOW report
-  2. Opens drawing lookup page showing the drawing ID
-  3. User selects the drawing file from their local computer using the file picker
-  4. File opens in a new browser tab via blob URL
-- **Limitation:** Browsers cannot directly access local file paths for security reasons. Users must manually select files using the file picker each time.
-
-### Database Schema
-The `sow_items` table includes:
-- `drawing_ids` (TEXT[]): Array of drawing numbers
-- `drawing_paths` (JSONB): Mapping of drawing IDs to file paths
-- `drawing_notes` (JSONB): Notes for each drawing
-
 ---
 
 ## 4. SOW Batch Timeline Shifting

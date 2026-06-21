@@ -1,15 +1,10 @@
 'use client'
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '../../../supabase'
 import { canAccessProject, PUBLIC_VIEWONLY_PROJECT_ID } from '../../../../lib/access'
 import { useTheme } from '../../../../lib/theme'
 import ThemeSelector from '../../../../components/ThemeSelector'
-import GanttPaginatedLayout from '../../../../components/gantt/GanttPaginatedLayout'
-import { computeScheduleRange } from '../../../../lib/gantt/dates'
-import { buildGanttRows } from '../../../../lib/gantt/rows'
-import { splitTimelineIntoPages } from '../../../../lib/gantt/timePages'
-import { GANTT_VIEW_MODES, type GanttViewMode } from '../../../../lib/gantt/types'
 
 type Project = {
   projectid: string; project_name: string; project_code: string
@@ -133,11 +128,7 @@ export default function ReportsModule() {
   }
 
   function handlePrint() {
-    if (activeReport === 'gantt') {
-      document.documentElement.classList.add('gantt-print-active')
-    }
     window.print()
-    window.setTimeout(() => document.documentElement.classList.remove('gantt-print-active'), 500)
   }
 
   if (loading || !project) return (
@@ -1359,130 +1350,302 @@ export default function ReportsModule() {
   }
 
   function GanttReport() {
-    const [viewMode, setViewMode] = useState<GanttViewMode>('month')
-    const [pageIndex, setPageIndex] = useState(0)
-    const [today] = useState(new Date().toISOString().split('T')[0])
+    const [viewMode, setViewMode] = useState<'day' | 'week' | 'month' | 'quarter' | 'half-year'>('day')
+    
+    const l3Items = sowItems.filter(r => r.hierarchy_level === 3)
+    const l2Items = sowItems.filter(r => r.hierarchy_level === 2)
+    const l1Items = sowItems.filter(r => r.hierarchy_level === 1)
 
-    const schedule = useMemo(
-      () =>
-        computeScheduleRange({
-          items: sowItems,
-          projectStart: project.start_date,
-          projectEnd: project.end_date,
-        }),
-      [sowItems, project.start_date, project.end_date]
-    )
+    const hasSchedule = l3Items.filter(r => r.baseline_start || r.planned_start)
 
-    const timePages = useMemo(
-      () => splitTimelineIntoPages(schedule.rangeStart, schedule.rangeEnd, viewMode),
-      [schedule.rangeStart, schedule.rangeEnd, viewMode]
-    )
+    const allStarts = hasSchedule.map(r => r.baseline_start || r.planned_start || project.start_date).filter(Boolean) as string[]
+    const allEnds = hasSchedule.map(r => (r.baseline_end || (r.baseline_start && r.baseline_days ? new Date(new Date(r.baseline_start).getTime() + r.baseline_days * 86400000).toISOString().split('T')[0] : undefined)) || (r.planned_end || (r.planned_start && r.planned_days ? new Date(new Date(r.planned_start).getTime() + r.planned_days * 86400000).toISOString().split('T')[0] : undefined)) || project.end_date).filter(Boolean) as string[]
 
-    const rows = useMemo(() => buildGanttRows({ items: sowItems }), [sowItems])
+    const validStarts = allStarts.filter(d => {
+      const date = new Date(d)
+      return !isNaN(date.getTime()) && date.getFullYear() >= 2000
+    })
+    const validEnds = allEnds.filter(d => {
+      const date = new Date(d)
+      return !isNaN(date.getTime()) && date.getFullYear() >= 2000
+    })
 
-    const panelTheme = {
-      isDark: false,
-      hBg: '#f9fafb',
-      panelBg: '#ffffff',
-      borderCol: '#e5e7eb',
-      gridCol: '#f3f4f6',
-      textNormal: '#374151',
-      textMuted: '#6b7280',
-      textHeader: '#111827',
+    const rangeStart = validStarts.length > 0 ? validStarts.sort()[0] : project.start_date
+    const rangeEnd = validEnds.length > 0 ? validEnds.sort().reverse()[0] : project.end_date
+    const totalDays = Math.max(1, daysBetween(rangeStart, rangeEnd))
+
+    const COL_W = viewMode === 'day' ? 8 : viewMode === 'week' ? 30 : viewMode === 'month' ? 80 : viewMode === 'quarter' ? 200 : 400
+    const ROW_H = 24
+    const LABEL_W = 200
+
+    function pct(dateStr: string): number {
+      return Math.max(0, Math.min(100, (daysBetween(rangeStart, dateStr) / totalDays) * 100))
     }
 
-    const toggles = { showBaseline: true, showPlanned: true, showActual: false }
-    const safePageIndex = Math.min(pageIndex, Math.max(0, timePages.length - 1))
-    const l3Items = sowItems.filter((r) => r.hierarchy_level === 3)
+    function resolveEnd(item: SowItem, field: 'baseline' | 'planned'): string | undefined {
+      if (field === 'baseline') {
+        if (item.baseline_end) return item.baseline_end
+        if (item.baseline_start && item.baseline_days) return new Date(new Date(item.baseline_start).getTime() + item.baseline_days * 86400000).toISOString().split('T')[0]
+      }
+      if (field === 'planned') {
+        if (item.planned_end) return item.planned_end
+        if (item.planned_start && item.planned_days) return new Date(new Date(item.planned_start).getTime() + item.planned_days * 86400000).toISOString().split('T')[0]
+      }
+      return undefined
+    }
+
+    const rows: { item: SowItem; level: number }[] = []
+    l1Items.forEach(l1 => {
+      rows.push({ item: l1, level: 1 })
+      const subs = l2Items.filter(l2 => l2.sow_number.startsWith(`${l1.sow_number}.`) && l2.sow_number.split('.').length === 2)
+      subs.forEach(l2 => {
+        rows.push({ item: l2, level: 2 })
+        const tasks = l3Items.filter(l3 => l3.sow_number.startsWith(`${l2.sow_number}.`) && l3.sow_number.split('.').length === 3 && (l3.baseline_start || l3.planned_start))
+        tasks.forEach(l3 => rows.push({ item: l3, level: 3 }))
+      })
+    })
+
+    const ganttWidth = totalDays * COL_W
 
     return (
       <div style={{ padding: '10px', fontSize: 10 }}>
-        <div className="report-no-print">
-          <ReportHeader />
-          <div style={{ marginBottom: 10, display: 'flex', gap: 30, fontSize: 9, flexWrap: 'wrap' }}>
-            <div><strong>Project Period:</strong> {project.start_date} → {project.end_date}</div>
-            <div><strong>Chart Period:</strong> {schedule.rangeStart} → {schedule.rangeEnd}</div>
-            <div><strong>Total Days:</strong> {schedule.totalDays}</div>
-            <div><strong>Total Tasks:</strong> {l3Items.length}</div>
-            <div><strong>Pages:</strong> {timePages.length}</div>
-          </div>
-          <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', fontSize: 9, flexWrap: 'wrap' }}>
-            <strong>View Mode:</strong>
-            {GANTT_VIEW_MODES.map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => {
-                  setViewMode(value)
-                  setPageIndex(0)
-                }}
-                style={{
-                  padding: '4px 8px',
-                  fontSize: 8,
-                  fontWeight: 600,
-                  background: viewMode === value ? '#a855f7' : '#f3f4f6',
-                  color: viewMode === value ? '#ffffff' : '#374151',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                }}
-              >
-                {label}
-              </button>
-            ))}
-            <span style={{ marginLeft: 8, color: '#6b7280' }}>|</span>
-            <button
-              disabled={safePageIndex <= 0}
-              onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
-              style={{ padding: '4px 8px', fontSize: 8, border: '1px solid #e5e7eb', borderRadius: 4, cursor: safePageIndex <= 0 ? 'not-allowed' : 'pointer', opacity: safePageIndex <= 0 ? 0.4 : 1 }}
-            >
-              ← Prev
-            </button>
-            <span style={{ fontSize: 8, color: '#6b7280' }}>Page {safePageIndex + 1} / {timePages.length}</span>
-            <button
-              disabled={safePageIndex >= timePages.length - 1}
-              onClick={() => setPageIndex((p) => Math.min(timePages.length - 1, p + 1))}
-              style={{ padding: '4px 8px', fontSize: 8, border: '1px solid #e5e7eb', borderRadius: 4, cursor: safePageIndex >= timePages.length - 1 ? 'not-allowed' : 'pointer', opacity: safePageIndex >= timePages.length - 1 ? 0.4 : 1 }}
-            >
-              Next →
-            </button>
-          </div>
-          {schedule.hasSchedule.length === 0 ? (
-            <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>No schedule data available</div>
-          ) : (
-            <div style={{ border: '1px solid #e5e7eb', overflow: 'auto' }}>
-              <GanttPaginatedLayout
-                variant="screen"
-                windows={timePages}
-                pageIndex={safePageIndex}
-                viewMode={viewMode}
-                rows={rows}
-                theme={panelTheme}
-                toggles={toggles}
-                today={today}
-                rowH={24}
-                labelW={200}
-                compact
-              />
-            </div>
-          )}
+        <ReportHeader />
+        <div style={{ marginBottom: 10, display: 'flex', gap: 30, fontSize: 9 }}>
+          <div><strong>Project Period:</strong> {project.start_date} → {project.end_date}</div>
+          <div><strong>Chart Period:</strong> {rangeStart} → {rangeEnd}</div>
+          <div><strong>Total Days:</strong> {totalDays}</div>
+          <div><strong>Total Tasks:</strong> {l3Items.length}</div>
         </div>
-        {schedule.hasSchedule.length > 0 && (
-          <div className="gantt-print-only" aria-hidden="true">
-            <div style={{ padding: '8px 0 6px', fontFamily: 'sans-serif' }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: '#111827' }}>{project.project_name}</div>
-              <div style={{ fontSize: 9, color: '#6b7280' }}>
-                {project.project_code} · Gantt Report · {GANTT_VIEW_MODES.find((m) => m.value === viewMode)?.label}
-              </div>
-            </div>
-            <GanttPaginatedLayout
-              variant="print"
-              windows={timePages}
-              viewMode={viewMode}
-              rows={rows}
-              theme={panelTheme}
-              toggles={toggles}
-              today={today}
+        <div style={{ marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', fontSize: 9 }}>
+          <strong>View Mode:</strong>
+          {(['day', 'week', 'month', 'quarter', 'half-year'] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              style={{
+                padding: '4px 8px',
+                fontSize: 8,
+                fontWeight: 600,
+                background: viewMode === mode ? '#a855f7' : '#f3f4f6',
+                color: viewMode === mode ? '#ffffff' : '#374151',
+                border: '1px solid #e5e7eb',
+                borderRadius: 4,
+                cursor: 'pointer',
+              }}
+            >
+              {mode.charAt(0).toUpperCase() + mode.slice(1).replace('-', ' ')}
+            </button>
+          ))}
+        </div>
+        <div style={{ marginBottom: 10, padding: '8px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 4 }}>
+          <div style={{ fontSize: 8, color: '#6b7280', marginBottom: 4 }}>Timeline Overview</div>
+          <div style={{ position: 'relative', height: '8px', background: '#e5e7eb', borderRadius: 4 }}>
+            <div
+              style={{
+                position: 'absolute',
+                left: `${Math.max(0, (daysBetween(project.start_date, rangeStart) / daysBetween(project.start_date, project.end_date)) * 100)}%`,
+                width: `${Math.min(100, (daysBetween(rangeStart, rangeEnd) / daysBetween(project.start_date, project.end_date)) * 100)}%`,
+                height: '100%',
+                background: '#a855f7',
+                borderRadius: 4,
+              }}
             />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 7, color: '#6b7280', marginTop: 2 }}>
+            <span>{project.start_date}</span>
+            <span>{project.end_date}</span>
+          </div>
+        </div>
+        {hasSchedule.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>No schedule data available</div>
+        ) : (
+          <div style={{ border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+              <thead className="gantt-print-header">
+                <tr>
+                  <td style={{ padding: 0, verticalAlign: 'top' }}>
+                    <div style={{ display: 'flex', minWidth: LABEL_W + ganttWidth }}>
+                      <div style={{ width: LABEL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', background: '#f9fafb', height: 44, display: 'flex', alignItems: 'center', padding: '0 8px', fontWeight: 600, fontSize: 9 }}>
+                        TASK / ACTIVITY
+                      </div>
+                      <div style={{ flex: 1, minWidth: ganttWidth }}>
+                        <div style={{ height: 22, display: 'flex', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                          {(() => {
+                            if (viewMode === 'day') {
+                              const months: { label: string; days: number }[] = []
+                              const cur = new Date(rangeStart)
+                              const end = new Date(rangeEnd)
+                              while (cur <= end) {
+                                const daysInMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate()
+                                const remaining = Math.ceil((end.getTime() - cur.getTime()) / 86400000) + 1
+                                const days = Math.min(daysInMonth - cur.getDate() + 1, remaining)
+                                months.push({ label: cur.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' }), days })
+                                cur.setMonth(cur.getMonth() + 1)
+                                cur.setDate(1)
+                              }
+                              return months.map((h, i) => (
+                                <div key={i} style={{ width: h.days * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
+                                  {h.label}
+                                </div>
+                              ))
+                            } else if (viewMode === 'week') {
+                              const weeks: { label: string; weeks: number }[] = []
+                              const cur = new Date(rangeStart)
+                              const end = new Date(rangeEnd)
+                              let weekNum = 1
+                              while (cur <= end) {
+                                const weekEnd = new Date(cur.getTime() + 7 * 86400000)
+                                const remaining = Math.ceil((end.getTime() - cur.getTime()) / 86400000) + 1
+                                const weeksCount = Math.min(1, Math.ceil(remaining / 7))
+                                weeks.push({ label: `W${weekNum}`, weeks: weeksCount })
+                                cur.setDate(cur.getDate() + 7)
+                                weekNum++
+                              }
+                              return weeks.map((h, i) => (
+                                <div key={i} style={{ width: h.weeks * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
+                                  {h.label}
+                                </div>
+                              ))
+                            } else if (viewMode === 'month') {
+                              const months: { label: string; months: number }[] = []
+                              const cur = new Date(rangeStart)
+                              const end = new Date(rangeEnd)
+                              while (cur <= end) {
+                                months.push({ label: cur.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' }), months: 1 })
+                                cur.setMonth(cur.getMonth() + 1)
+                                cur.setDate(1)
+                              }
+                              return months.map((h, i) => (
+                                <div key={i} style={{ width: h.months * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
+                                  {h.label}
+                                </div>
+                              ))
+                            } else if (viewMode === 'quarter') {
+                              const quarters: { label: string; quarters: number }[] = []
+                              const cur = new Date(rangeStart)
+                              const end = new Date(rangeEnd)
+                              const quarter = Math.floor(cur.getMonth() / 3) + 1
+                              const year = cur.getFullYear()
+                              quarters.push({ label: `Q${quarter} ${year}`, quarters: 1 })
+                              cur.setMonth(cur.getMonth() + 3)
+                              cur.setDate(1)
+                              while (cur <= end) {
+                                const q = Math.floor(cur.getMonth() / 3) + 1
+                                const y = cur.getFullYear()
+                                quarters.push({ label: `Q${q} ${y}`, quarters: 1 })
+                                cur.setMonth(cur.getMonth() + 3)
+                                cur.setDate(1)
+                              }
+                              return quarters.map((h, i) => (
+                                <div key={i} style={{ width: h.quarters * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
+                                  {h.label}
+                                </div>
+                              ))
+                            } else {
+                              const halfYears: { label: string; halfYears: number }[] = []
+                              const cur = new Date(rangeStart)
+                              const end = new Date(rangeEnd)
+                              const halfYear = cur.getMonth() < 6 ? 'H1' : 'H2'
+                              const year = cur.getFullYear()
+                              halfYears.push({ label: `${halfYear} ${year}`, halfYears: 1 })
+                              cur.setMonth(cur.getMonth() + 6)
+                              cur.setDate(1)
+                              while (cur <= end) {
+                                const hy = cur.getMonth() < 6 ? 'H1' : 'H2'
+                                const y = cur.getFullYear()
+                                halfYears.push({ label: `${hy} ${y}`, halfYears: 1 })
+                                cur.setMonth(cur.getMonth() + 6)
+                                cur.setDate(1)
+                              }
+                              return halfYears.map((h, i) => (
+                                <div key={i} style={{ width: h.halfYears * COL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', padding: '0 4px', fontSize: 8, fontWeight: 600 }}>
+                                  {h.label}
+                                </div>
+                              ))
+                            }
+                          })()}
+                        </div>
+                        <div style={{ height: 22, display: 'flex', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                          {viewMode === 'day' ? (
+                            Array.from({ length: totalDays }).map((_, d) => {
+                              const date = new Date(new Date(rangeStart).getTime() + d * 86400000).toISOString().split('T')[0]
+                              const dayNum = new Date(date).getDate()
+                              if (dayNum !== 1 && dayNum !== 8 && dayNum !== 15 && dayNum !== 22) return <div key={d} style={{ width: COL_W, flexShrink: 0 }} />
+                              return (
+                                <div key={d} style={{ width: COL_W, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: dayNum === 1 ? '1px solid #d1d5db' : 'none', fontSize: 7 }}>
+                                  {dayNum}
+                                </div>
+                              )
+                            })
+                          ) : viewMode === 'week' ? (
+                            Array.from({ length: Math.ceil(totalDays / 7) }).map((_, w) => {
+                              const weekStart = new Date(new Date(rangeStart).getTime() + w * 7 * 86400000).toISOString().split('T')[0]
+                              const weekEnd = new Date(new Date(rangeStart).getTime() + (w + 1) * 7 * 86400000).toISOString().split('T')[0]
+                              return (
+                                <div key={w} style={{ width: COL_W, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e5e7eb', fontSize: 7 }}>
+                                  {weekStart.slice(5)}
+                                </div>
+                              )
+                            })
+                          ) : viewMode === 'month' ? (
+                            Array.from({ length: Math.ceil(totalDays / 30) }).map((_, m) => {
+                              const monthStart = new Date(new Date(rangeStart).getTime() + m * 30 * 86400000)
+                              return (
+                                <div key={m} style={{ width: COL_W, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #e5e7eb', fontSize: 7 }}>
+                                  {monthStart.toLocaleDateString('en-ZA', { month: 'short' })}
+                                </div>
+                              )
+                            })
+                          ) : (
+                            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7 }}>
+                              {viewMode === 'quarter' ? 'Quarterly View' : 'Half-Yearly View'}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ item, level }, i) => {
+                  const isL1 = level === 1
+                  const isL2 = level === 2
+                  const bg = isL1 ? '#f3f4f6' : isL2 ? '#ffffff' : 'transparent'
+                  const textColor = isL1 ? '#111827' : isL2 ? '#374151' : '#6b7280'
+                  const indent = isL1 ? 4 : isL2 ? 12 : 20
+                  const label = isL1 ? item.scope_l1 || item.sow_number : isL2 ? item.item_l2 || item.sow_number : item.sub_item_l3 || item.particulars || item.sow_number
+
+                  const baseStart = item.baseline_start
+                  const baseEnd = resolveEnd(item, 'baseline')
+                  const planStart = item.planned_start
+                  const planEnd = resolveEnd(item, 'planned')
+                  const barColor = item.is_critical_path ? '#ef4444' : level === 1 ? '#534AB7' : level === 2 ? '#378ADD' : '#2563eb'
+
+                  return (
+                    <tr key={item.sow_id + i} style={{ pageBreakInside: 'avoid' }}>
+                      <td style={{ padding: 0, verticalAlign: 'top' }}>
+                        <div style={{ display: 'flex', borderBottom: '1px solid #f3f4f6' }}>
+                          <div style={{ width: LABEL_W, flexShrink: 0, borderRight: '1px solid #e5e7eb', background: bg, height: ROW_H, display: 'flex', alignItems: 'center', padding: `0 4px 0 ${indent}px`, fontSize: 8, fontWeight: isL1 ? 600 : isL2 ? 500 : 400, color: textColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {label}
+                          </div>
+                          <div style={{ flex: 1, minWidth: ganttWidth, position: 'relative', height: ROW_H, background: bg }}>
+                            {baseStart && baseEnd && (
+                              <div style={{ position: 'absolute', left: `${pct(baseStart)}%`, width: `${Math.max(0.3, pct(baseEnd) - pct(baseStart))}%`, height: 4, top: ROW_H / 2 - 2, background: '#6b7280', opacity: 0.5 }} />
+                            )}
+                            {planStart && planEnd && level === 3 && (
+                              <div style={{ position: 'absolute', left: `${pct(planStart)}%`, width: `${Math.max(0.3, pct(planEnd) - pct(planStart))}%`, height: 10, top: ROW_H / 2 - 5, background: barColor + '33', border: `1px solid ${barColor}66`, borderRadius: 1 }}>
+                                <div style={{ height: '100%', width: `${item.percent_complete || 0}%`, background: barColor, borderRadius: '1px 0 0 1px', opacity: 0.9 }} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -1549,51 +1712,26 @@ export default function ReportsModule() {
           border-color: #d1d5db !important;
         }
         @media print {
-          .no-print,
-          .report-no-print { display: none !important; }
-          html.gantt-print-active body * { visibility: hidden; }
-          html.gantt-print-active .gantt-print-only,
-          html.gantt-print-active .gantt-print-only * { visibility: visible; }
-          html.gantt-print-active .gantt-print-only {
-            display: block !important;
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-          }
+          .no-print { display: none !important; }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          html, body { background: white !important; height: auto !important; overflow: visible !important; }
+          html, body { background: white !important; }
           body { color: black !important; }
           .print-area { background: white !important; color: black !important; padding: 20px; }
           .report-doc,
           .report-doc * {
             box-shadow: none !important;
           }
-          [data-report-type="gantt"] .print-area {
-            padding: 0 !important;
-          }
-          [data-report-type="gantt"] .report-doc {
-            max-width: none !important;
-            padding: 0 !important;
-          }
-          html.gantt-print-active .gantt-print-page {
-            page: gantt-page;
-            break-after: page;
-            page-break-after: always;
-            page-break-inside: avoid;
-            overflow: hidden;
-          }
-          html.gantt-print-active .gantt-print-page:last-child {
-            break-after: auto;
-            page-break-after: auto;
-          }
-          @page gantt-page {
-            margin: 10mm;
-            size: A3 landscape;
-          }
           @page { margin: 12mm; size: A4; }
         }
-        .gantt-print-only { display: none; }
+        @media print and (data-report-type: gantt) {
+          @page { margin: 10mm; size: A3 landscape; }
+          thead.gantt-print-header {
+            display: table-header-group;
+          }
+          .gantt-print-header {
+            display: table-header-group !important;
+          }
+        }
       `}</style>
 
       {/* HEADER */}

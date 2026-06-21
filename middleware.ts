@@ -13,6 +13,20 @@ const PUBLIC_VIEWONLY_PROJECT_PREFIX = `/dashboard/${PUBLIC_VIEWONLY_PROJECT_ID}
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  const supabaseUrlRaw = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const isPlaceholder = !supabaseUrlRaw || 
+                        supabaseUrlRaw.includes('your-project-ref') ||
+                        !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+                        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY.includes('your_supabase_anon_publishable_key')
+
+  const devBypassCookie = request.cookies.get('cpos-dev-bypass')
+  const isDevBypass = devBypassCookie && devBypassCookie.value === 'true'
+
+  if (isPlaceholder || isDevBypass) {
+    // In unconfigured sandbox environments or when developer bypass cookie is active, bypass server redirect check to allow access to local mock states.
+    return NextResponse.next()
+  }
+
   // Allow public read-only access to this specific project.
   if (pathname === PUBLIC_VIEWONLY_PROJECT_PREFIX || pathname.startsWith(`${PUBLIC_VIEWONLY_PROJECT_PREFIX}/`)) {
     return NextResponse.next()

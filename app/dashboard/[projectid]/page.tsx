@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '../../supabase'
 import { canAccessProject, PUBLIC_VIEWONLY_PROJECT_ID } from '../../../lib/access'
@@ -9,7 +9,8 @@ import {
   DollarSign, FileText, Download, Upload, AlertCircle, 
   ChevronRight, MoreVertical, Plus, Clock, Shield,
   BarChart3, Users, Filter, Search, Trash2, Edit2, Settings,
-  FolderOpen
+  FolderOpen, ShieldAlert, TrendingUp, Zap, AlertTriangle,
+  Award, ArrowRight
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import Link from 'next/link'
@@ -587,10 +588,130 @@ export default function ProjectDetail() {
 
   if (!project) return null
 
+  // Computing SOW schedule & budget variance metrics
+  const sowStats = useMemo(() => {
+    let completedCount = 0
+    let inProgressCount = 0
+    let delayedCount = 0
+    let notStartedCount = 0
+
+    let sumPlannedDuration = 0
+    let weightedProgressSum = 0
+
+    let totalEstCost = 0
+    let totalActCost = 0
+    let totalCostVar = 0
+    let totalSchedVarDays = 0
+
+    const activeAlerts: Array<{
+      id: string
+      sow_number: string
+      title: string
+      severity: 'critical' | 'warning'
+      msg: string
+      type: 'cost' | 'schedule'
+    }> = []
+
+    sowTasks.forEach(item => {
+      const pct = item.percent_complete || 0
+      const statusStr = (item.status || 'Not Started').toLowerCase()
+      
+      if (pct === 100 || statusStr === 'complete' || statusStr === 'completed') {
+        completedCount++
+      } else if (statusStr === 'delayed') {
+        delayedCount++
+      } else if (pct > 0 || statusStr === 'in progress') {
+        inProgressCount++
+      } else {
+        notStartedCount++
+      }
+
+      const duration = item.baseline_days || item.planned_days || 1
+      sumPlannedDuration += duration
+      weightedProgressSum += pct * duration
+
+      const est = item.estimated_cost || 0
+      const act = item.actual_cost || 0
+      totalEstCost += est
+      totalActCost += act
+      
+      const itemCostVar = act - est
+      if (act > 0 && est > 0) {
+        totalCostVar += itemCostVar
+        if (itemCostVar > 0) {
+          activeAlerts.push({
+            id: item.sow_id,
+            sow_number: item.sow_number,
+            title: item.description || `SOW Line ${item.sow_number}`,
+            severity: 'warning',
+            msg: `Cost overrun of ${project.currency} ${itemCostVar.toLocaleString()}`,
+            type: 'cost'
+          })
+        }
+      }
+
+      if (item.baseline_end) {
+        try {
+          const baselineEndD = new Date(item.baseline_end)
+          const today = new Date()
+          
+          let slippageDays = 0
+          if (pct < 100 && today > baselineEndD) {
+            slippageDays = Math.round((today.getTime() - baselineEndD.getTime()) / 86400000)
+          } else if (item.actual_end) {
+            const actEndD = new Date(item.actual_end)
+            slippageDays = Math.round((actEndD.getTime() - baselineEndD.getTime()) / 86400000)
+          }
+
+          if (slippageDays > 0) {
+            totalSchedVarDays += slippageDays
+            if (slippageDays > 7) {
+              activeAlerts.push({
+                id: item.sow_id,
+                sow_number: item.sow_number,
+                title: item.description || `SOW Line ${item.sow_number}`,
+                severity: 'critical',
+                msg: `Delay: behind schedule by ${slippageDays} days`,
+                type: 'schedule'
+              })
+            } else {
+              activeAlerts.push({
+                id: item.sow_id,
+                sow_number: item.sow_number,
+                title: item.description || `SOW Line ${item.sow_number}`,
+                severity: 'warning',
+                msg: `Minor delay: behind by ${slippageDays} days`,
+                type: 'schedule'
+              })
+            }
+          }
+        } catch (err) {
+          console.error("Date calculation crash prevented", err)
+        }
+      }
+    })
+
+    const weightedProgress = sumPlannedDuration > 0
+      ? Math.round(weightedProgressSum / sumPlannedDuration)
+      : (sowTasks.length > 0 ? Math.round(sowTasks.reduce((s, t) => s + (t.percent_complete || 0), 0) / sowTasks.length) : 0)
+
+    return {
+      totalTasks: sowTasks.length,
+      completedCount,
+      inProgressCount,
+      delayedCount,
+      notStartedCount,
+      overallProgress: weightedProgress,
+      totalCostVar,
+      totalSchedVarDays,
+      activeAlerts
+    }
+  }, [sowTasks, project])
+
   const totalSpent = costs.reduce((s, c) => s + Number(c.amount), 0)
   const spentPct = project.budget > 0 ? Math.round((totalSpent / project.budget) * 100) : 0
   const progress = sowTasks.length > 0
-    ? Math.round(sowTasks.reduce((s, t) => s + (t.percent_complete || 0), 0) / sowTasks.length)
+    ? sowStats.overallProgress
     : (metrics?.overall_progress || 0)
   const sc = getStatusColors(project.status, isDark)
 
@@ -847,6 +968,214 @@ export default function ProjectDetail() {
 
                 {/* Sidebar Info */}
                 <div className="space-y-8">
+                  {/* Dynamic CPOS Intelligence Engine */}
+                  <div className={`rounded-[32px] p-6 border transition-all ${
+                    isDark 
+                      ? 'bg-[#0d1117] border-[#21262d] shadow-xl text-[#c9d1d9]' 
+                      : 'bg-white border-slate-200/80 shadow-md text-slate-800'
+                  }`}>
+                    <div className="flex items-center justify-between mb-4 pb-3 border-b border-dashed border-slate-700/30">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                          <Zap className="w-4 h-4 text-orange-500 animate-pulse" />
+                        </div>
+                        <div>
+                          <h4 className={`text-xs font-black tracking-wider uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                            CPOS CONTROL INTEL
+                          </h4>
+                          <span className="text-[9px] font-bold text-slate-400 block tracking-widest leading-none mt-0.5">
+                            REAL-TIME TELEMETRY
+                          </span>
+                        </div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${
+                        sowStats.activeAlerts.length > 0 
+                          ? 'bg-red-500/10 text-red-400' 
+                          : 'bg-emerald-500/10 text-emerald-400'
+                      }`}>
+                        {sowStats.activeAlerts.length > 0 ? `${sowStats.activeAlerts.length} ALERTS` : 'HEALTHY'}
+                      </span>
+                    </div>
+
+                    {/* Variance Statistics */}
+                    <div className="grid grid-cols-2 gap-3 mb-5">
+                      <div className={`p-3 rounded-2xl border ${isDark ? 'bg-slate-950/20 border-[#21262d]' : 'bg-slate-50 border-slate-100'}`}>
+                        <span className="text-[8px] text-slate-400 block font-black uppercase tracking-wider">
+                          Float Slip
+                        </span>
+                        <div className="flex items-baseline gap-1 mt-1">
+                          <span className={`text-sm font-mono font-black ${
+                            sowStats.totalSchedVarDays > 0 ? 'text-red-500' : 'text-emerald-500'
+                          }`}>
+                            {sowStats.totalSchedVarDays > 0 ? `+${sowStats.totalSchedVarDays}d` : '0d'}
+                          </span>
+                          <span className="text-[7px] text-slate-400 font-bold uppercase block">
+                            SLIPPAGE
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className={`p-3 rounded-2xl border ${isDark ? 'bg-slate-950/20 border-[#21262d]' : 'bg-slate-50 border-slate-100'}`}>
+                        <span className="text-[8px] text-slate-400 block font-black uppercase tracking-wider">
+                          BOQ Variance
+                        </span>
+                        <div className="flex items-baseline gap-0.5 mt-1 overflow-hidden text-ellipsis">
+                          <span className={`text-xs font-mono font-black ${
+                            sowStats.totalCostVar > 0 ? 'text-red-500' : 'text-emerald-500'
+                          }`}>
+                            {sowStats.totalCostVar !== 0 
+                              ? `${project.currency} ${sowStats.totalCostVar.toLocaleString()}`
+                              : 'ON BUDGET'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Project Status Mix Indicator */}
+                    <div className="space-y-2 mb-4">
+                      <div className="flex justify-between text-[9px] font-bold uppercase text-slate-400 tracking-wider">
+                        <span>Work Package Balance</span>
+                        <span>{sowStats.completedCount}/{sowStats.totalTasks} Done</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden flex">
+                        <div style={{ width: `${sowStats.totalTasks > 0 ? (sowStats.completedCount / sowStats.totalTasks) * 100 : 0}%` }} className="bg-emerald-500" title="Completed" />
+                        <div style={{ width: `${sowStats.totalTasks > 0 ? (sowStats.inProgressCount / sowStats.totalTasks) * 100 : 0}%` }} className="bg-amber-500" title="In Progress" />
+                        <div style={{ width: `${sowStats.totalTasks > 0 ? (sowStats.delayedCount / sowStats.totalTasks) * 100 : 0}%` }} className="bg-red-500" title="Delayed" />
+                      </div>
+                      <div className="flex justify-between text-[7px] text-slate-400 font-medium">
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 block" /> {sowStats.completedCount} COMP</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 block" /> {sowStats.inProgressCount} PROG</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500 block" /> {sowStats.delayedCount} DELAY</span>
+                      </div>
+                    </div>
+
+                    {/* Alerts Queue */}
+                    <div className="space-y-2 mt-4">
+                      <span className="text-[9px] font-black tracking-widest uppercase text-slate-400 block mb-2">
+                        Active Critical Warnings
+                      </span>
+                      {sowStats.activeAlerts.length === 0 ? (
+                        <div className={`p-4 rounded-xl border border-dashed flex flex-col items-center justify-center text-center ${
+                          isDark ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-emerald-200 bg-emerald-50 bg-opacity-40'
+                        }`}>
+                          <span className="text-emerald-500 text-xs">🟢</span>
+                          <span className={`text-[10px] uppercase tracking-wider font-extrabold mt-1.5 ${isDark ? 'text-emerald-300' : 'text-[#15803d]'}`}>
+                            SYSTEM STATUS HEALTHY
+                          </span>
+                          <span className="text-[8px] font-medium text-slate-400 mt-1 max-w-[180px]">
+                            No timeline slippages or cost overruns detected across active packages.
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="max-h-56 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                          {sowStats.activeAlerts.map((alert, aIdx) => (
+                            <div 
+                              key={aIdx} 
+                              className={`p-3 rounded-xl border text-[11px] font-medium flex items-start gap-2.5 transition-all hover:scale-[1.01] ${
+                                alert.severity === 'critical' 
+                                  ? (isDark ? 'bg-red-950/20 border-red-500/20' : 'bg-red-50 border-red-100')
+                                  : (isDark ? 'bg-amber-950/20 border-amber-500/20' : 'bg-amber-50 border-amber-100')
+                              }`}
+                            >
+                              {alert.severity === 'critical' ? (
+                                <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5 animate-pulse" />
+                              ) : (
+                                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                              )}
+                              <div className="space-y-0.5">
+                                <span className={`font-black uppercase text-[8px] tracking-wider block ${
+                                  alert.severity === 'critical' ? 'text-red-400' : 'text-amber-500'
+                                }`}>
+                                  Line #{alert.sow_number} • {alert.type.toUpperCase()}
+                                </span>
+                                <p className={`font-semibold leading-tight ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                                  {alert.title}
+                                </p>
+                                <p className="text-[10px] text-slate-400">
+                                  {alert.msg}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Dashboard Sponsor & Partner Spotlight Banner */}
+                  <div className={`rounded-[32px] p-6 border transition-all ${
+                    isDark 
+                      ? 'bg-[#0d1117] border-[#21262d] shadow-xl text-[#c9d1d9]' 
+                      : 'bg-white border-slate-200/80 shadow-md text-slate-800'
+                  }`}>
+                    <div className="flex items-center justify-between mb-4 pb-3 border-b border-dashed border-slate-700/30">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center animate-pulse">
+                          <Award className="w-4 h-4 text-orange-500" />
+                        </div>
+                        <div>
+                          <h4 className={`text-xs font-black tracking-wider uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                            PARTNER SPOTLIGHT
+                          </h4>
+                          <span className="text-[9px] font-bold text-orange-500 block tracking-widest leading-none mt-0.5">
+                            DEALS FOR CPOS USERS
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[8px] font-mono text-slate-400 font-bold uppercase tracking-widest">
+                        SPONSORED
+                      </span>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className={`p-4 rounded-2xl border ${isDark ? 'bg-[#161b22]/40 border-[#21262d]' : 'bg-slate-50 border-slate-100'} space-y-3`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase bg-orange-500/10 text-orange-600 px-2 py-0.5 rounded border border-orange-500/15">
+                            AutoCAD & BIM
+                          </span>
+                          <span className="text-[8px] text-slate-400 font-bold">15% CPOS DISCOUNT</span>
+                        </div>
+                        <h5 className={`text-xs font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                          Autodesk Connected Workflows
+                        </h5>
+                        <p className="text-[11px] text-slate-500 leading-relaxed font-semibold">
+                          Sync 3D BIM coordination sheets, automatic estimation parameters, and design schedules directly inside CPOS.
+                        </p>
+                        <a 
+                          href="https://www.autodesk.com" 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="text-[10px] font-black uppercase text-orange-500 flex items-center gap-1 hover:gap-1.5 transition-all mt-2"
+                        >
+                          Claim promo license <ArrowRight className="w-3 h-3" />
+                        </a>
+                      </div>
+
+                      <div className={`p-4 rounded-2xl border ${isDark ? 'bg-[#161b22]/40 border-[#21262d]' : 'bg-slate-50 border-slate-100'} space-y-3`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded border border-emerald-500/15">
+                            Site Logistics
+                          </span>
+                          <span className="text-[8px] text-slate-400 font-bold">30-DAY FREE TRIAL</span>
+                        </div>
+                        <h5 className={`text-xs font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                          Procore Construction Management
+                        </h5>
+                        <p className="text-[11px] text-slate-500 leading-relaxed font-semibold">
+                          Connect all structural site engineers, heavy operators, and procurement logs on one system.
+                        </p>
+                        <a 
+                          href="https://www.procore.com" 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="text-[10px] font-black uppercase text-orange-500 flex items-center gap-1 hover:gap-1.5 transition-all mt-2"
+                        >
+                          Unlock free trial <ArrowRight className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="bg-slate-900 text-white rounded-[40px] p-10 overflow-hidden relative">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/20 rounded-full -mr-16 -mt-16 blur-3xl" />
                     <h3 className="text-2xl font-black tracking-tight mb-6 relative z-10 text-white">Project Intel</h3>
