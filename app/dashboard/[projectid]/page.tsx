@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '../../supabase'
 import { canAccessProject, PUBLIC_VIEWONLY_PROJECT_ID } from '../../../lib/access'
+import { fetchAllRows } from '../../../lib/supabasePaginate'
 import * as XLSX from 'xlsx'
 import { 
   ArrowLeft, LayoutDashboard, Calendar, CheckSquare, 
@@ -16,6 +17,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import Link from 'next/link'
 import { useTheme } from '../../../lib/theme'
 import ThemeSelector from '../../../components/ThemeSelector'
+import ProjectSettingsPanel from '../../../components/ProjectSettingsPanel'
 
 type Project = {
   projectid: string; project_name: string; project_code: string
@@ -107,6 +109,7 @@ export default function ProjectDetail() {
   const [sowTasks, setSowTasks] = useState<SowTask[]>([])
   const [costs, setCosts] = useState<CostEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [showSettings, setShowSettings] = useState(false)
   const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'tasks' | 'costs'>('overview')
   const [showCostForm, setShowCostForm] = useState(false)
   const [costForm, setCostForm] = useState({ ...emptyCostForm })
@@ -168,7 +171,9 @@ export default function ProjectDetail() {
       supabase.from('project_timeline').select('*').eq('projectid', projectid).order('sort_order'),
       supabase.from('tasks').select('*').eq('projectid', projectid).order('due_date'),
       supabase.from('cost_entries').select('*').eq('projectid', projectid).order('cost_date', { ascending: false }),
-      supabase.from('sow_items').select('*').eq('projectid', projectid).eq('hierarchy_level', 3).order('sow_number'),
+      fetchAllRows<SowTask>((from, to) =>
+        supabase.from('sow_items').select('*').eq('projectid', projectid).eq('hierarchy_level', 3).order('sow_number').range(from, to)
+      ),
     ])
     if (pRes.data) setProject(pRes.data)
     if (mRes.data) setMetrics(mRes.data)
@@ -567,29 +572,22 @@ export default function ProjectDetail() {
     }
   }
 
-  if (loading) {
-    return (
-      <div 
-        className={`min-h-screen flex items-center justify-center font-sans ${
-          isDark ? 'bg-[#0a0c0e] text-[#c9d1d9]' : 'bg-[#F8FAFC]'
-        }`}
-        style={isDark ? {
-          background: '#0a0c0e',
-          backgroundImage: 'linear-gradient(rgba(96,165,250,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(96,165,250,0.025) 1px, transparent 1px)',
-          backgroundSize: '32px 32px'
-        } : {}}
-      >
-        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
-          <LayoutDashboard className="w-10 h-10 text-orange-500" />
-        </motion.div>
-      </div>
-    )
-  }
-
-  if (!project) return null
-
   // Computing SOW schedule & budget variance metrics
   const sowStats = useMemo(() => {
+    if (!project || !sowTasks) {
+      return {
+        completedCount: 0,
+        inProgressCount: 0,
+        delayedCount: 0,
+        notStartedCount: 0,
+        overallProgress: 0,
+        totalEstCost: 0,
+        totalActCost: 0,
+        totalCostVar: 0,
+        totalSchedVarDays: 0,
+        activeAlerts: []
+      }
+    }
     let completedCount = 0
     let inProgressCount = 0
     let delayedCount = 0
@@ -708,6 +706,8 @@ export default function ProjectDetail() {
     }
   }, [sowTasks, project])
 
+  if (!project) return null
+
   const totalSpent = costs.reduce((s, c) => s + Number(c.amount), 0)
   const spentPct = project.budget > 0 ? Math.round((totalSpent / project.budget) * 100) : 0
   const progress = sowTasks.length > 0
@@ -726,6 +726,20 @@ export default function ProjectDetail() {
         backgroundSize: '32px 32px'
       } : {}}
     >
+      {/* Project Settings Panel */}
+      {showSettings && project && (
+        <ProjectSettingsPanel
+          project={project}
+          onClose={() => setShowSettings(false)}
+          onProjectUpdated={(updated) => {
+            setProject(prev => prev ? { ...prev, ...updated } : prev)
+            setShowSettings(false)
+          }}
+          onProjectDeleted={() => {
+            router.push('/dashboard')
+          }}
+        />
+      )}
       {/* Top Header Navigation */}
       <header className={`sticky top-0 z-30 px-6 py-4 flex items-center justify-between transition-all duration-300 border-b ${
         isDark ? 'bg-[#0d1117]/90 border-[#21262d] backdrop-blur' : 'bg-white border-slate-200'
@@ -767,7 +781,11 @@ export default function ProjectDetail() {
           </div>
           <div className={`h-8 w-px mx-2 ${isDark ? 'bg-[#21262d]' : 'bg-slate-200'}`} />
           <ThemeSelector theme={theme} setTheme={setTheme} compact />
-          <button className={`p-2 rounded-xl transition-colors ${isDark ? 'hover:bg-[#161b22] text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}>
+          <button
+            onClick={() => setShowSettings(true)}
+            className={`p-2 rounded-xl transition-colors ${isDark ? 'hover:bg-[#161b22] text-slate-400 hover:text-orange-400' : 'hover:bg-slate-100 text-slate-500 hover:text-orange-500'}`}
+            title="Project Settings"
+          >
             <Settings className="w-5 h-5" />
           </button>
         </div>

@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '../../../supabase'
 import { canAccessProject, PUBLIC_VIEWONLY_PROJECT_ID } from '../../../../lib/access'
+import { fetchAllRows } from '../../../../lib/supabasePaginate'
 import { useTheme } from '../../../../lib/theme'
 import ThemeSelector from '../../../../components/ThemeSelector'
 
@@ -118,7 +119,9 @@ export default function ReportsModule() {
     setLoading(true)
     const [pRes, sowRes, costRes] = await Promise.all([
       supabase.from('projects').select('*').eq('projectid', projectid).single(),
-      supabase.from('sow_items').select('*').eq('projectid', projectid).order('sow_number'),
+      fetchAllRows<SowItem>((from, to) =>
+        supabase.from('sow_items').select('*').eq('projectid', projectid).order('sow_number').range(from, to)
+      ),
       supabase.from('cost_entries').select('*').eq('projectid', projectid).order('cost_date', { ascending: false }),
     ])
     if (pRes.data) setProject(pRes.data)

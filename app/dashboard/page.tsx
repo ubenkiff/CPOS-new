@@ -7,6 +7,7 @@ import { motion } from 'motion/react'
 import Link from 'next/link'
 import { useTheme } from '../../lib/theme'
 import ThemeSelector from '../../components/ThemeSelector'
+import ProjectSettingsPanel from '../../components/ProjectSettingsPanel'
 
 type Project = {
   projectid: string
@@ -44,6 +45,7 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [settingsProject, setSettingsProject] = useState<Project | null>(null)
   const router = useRouter()
   const { theme, setTheme, isDark } = useTheme()
 
@@ -268,13 +270,23 @@ export default function Dashboard() {
               <motion.div
                 key={project.projectid}
                 whileHover={{ y: -5 }}
-                className={`rounded-[32px] p-8 shadow-sm transition-all cursor-pointer group border ${
+                className={`rounded-[32px] p-8 shadow-sm transition-all cursor-pointer group border relative ${
                   isDark 
                     ? 'bg-[#0d1117] border-[#21262d] text-[#c9d1d9] hover:shadow-xl hover:shadow-orange-500/5 hover:border-orange-500/30' 
                     : 'bg-white border-slate-100 text-slate-900 hover:shadow-xl hover:shadow-slate-200/50 hover:border-orange-100'
                 }`}
                 onClick={() => router.push(`/dashboard/${project.projectid}`)}
               >
+                {/* Settings gear — stop propagation so card click doesn't fire */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setSettingsProject(project) }}
+                  className={`absolute top-5 right-5 p-2 rounded-xl opacity-0 group-hover:opacity-100 transition-all z-10 ${
+                    isDark ? 'hover:bg-[#161b22] text-slate-500 hover:text-orange-400' : 'hover:bg-slate-100 text-slate-400 hover:text-orange-500'
+                  }`}
+                  title="Project Settings"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
                 <div className="flex justify-between items-start mb-6">
                   <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                     {project.project_code}
@@ -324,6 +336,22 @@ export default function Dashboard() {
           })}
         </div>
       </main>
+
+      {/* Settings panel — rendered at root level so it overlays everything */}
+      {settingsProject && (
+        <ProjectSettingsPanel
+          project={settingsProject}
+          onClose={() => setSettingsProject(null)}
+          onProjectUpdated={(updated) => {
+            setProjects(prev => prev.map(p => p.projectid === updated.projectid ? { ...p, ...updated } : p))
+            setSettingsProject(null)
+          }}
+          onProjectDeleted={() => {
+            setProjects(prev => prev.filter(p => p.projectid !== settingsProject.projectid))
+            setSettingsProject(null)
+          }}
+        />
+      )}
     </div>
   )
 }

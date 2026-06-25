@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '../../../supabase'
 import { canAccessProject, PUBLIC_VIEWONLY_PROJECT_ID } from '../../../../lib/access'
+import { fetchAllRows } from '../../../../lib/supabasePaginate'
 import { useTheme } from '../../../../lib/theme'
 import ThemeSelector from '../../../../components/ThemeSelector'
 
@@ -194,11 +195,14 @@ export default function DocumentsModule() {
   }
 
   async function fetchSowItems() {
-    const { data } = await supabase
-      .from('sow_items')
-      .select('sow_id,sow_number,scope_l1,item_l2,sub_item_l3')
-      .eq('projectid', projectid)
-      .order('sow_number')
+    const { data } = await fetchAllRows((from, to) =>
+      supabase
+        .from('sow_items')
+        .select('sow_id,sow_number,scope_l1,item_l2,sub_item_l3')
+        .eq('projectid', projectid)
+        .order('sow_number')
+        .range(from, to)
+    )
     setSowItems(data || [])
   }
 

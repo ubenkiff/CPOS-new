@@ -8,6 +8,7 @@ import { useTheme } from '../../../../lib/theme'
 import ThemeSelector from '../../../../components/ThemeSelector'
 import { parseXERToSow, parseMSPXmlToSow, parseCSVToSow, ParsedSowItem } from '../../../../lib/schedulerParser'
 import ActivityLogModal from '../../../../components/ActivityLogModal'
+import { fetchAllRows } from '../../../../lib/supabasePaginate'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -227,7 +228,7 @@ export default function SowPage() {
   const [viewMode, setViewMode] = useState<'tree' | 'drawings'>('tree')
   const [drawingsSearch, setDrawingsSearch] = useState('')
   const [onlyShowWithDrawings, setOnlyShowWithDrawings] = useState(false)
-  const [showFullSowTree, setShowFullSowTree] = useState(false)
+  const [showFullSowTree, setShowFullSowTree] = useState(true)
   const [drawingSubMode, setDrawingSubMode] = useState<'items' | 'compiled'>('items')
   const [expandedDrawings, setExpandedDrawings] = useState<Record<string, boolean>>({})
 
@@ -919,10 +920,12 @@ export default function SowPage() {
       return
     }
 
-    const [pRes, sRes, dRes] = await Promise.all([
+    const [pRes, dRes, sRes] = await Promise.all([
       supabase.from('projects').select('*').eq('projectid', projectid).single(),
-      supabase.from('sow_items').select('*').eq('projectid', projectid).order('sow_number'),
-      supabase.from('documents').select('*').eq('projectid', projectid)
+      supabase.from('documents').select('*').eq('projectid', projectid),
+      fetchAllRows<SowItem>((from, to) =>
+        supabase.from('sow_items').select('*').eq('projectid', projectid).order('sow_number').range(from, to)
+      )
     ])
 
     if (user && pRes.data) {
@@ -986,12 +989,19 @@ export default function SowPage() {
 
   function getL2ForL1(l1: SowItem) {
     const prefix = l1.sow_number + '.'
-    return l2Items.filter(i => i.sow_number.startsWith(prefix) && i.sow_number.split('.').length === 2)
+    // Match by SOW number prefix OR by scope L1 name for robustness
+    return l2Items.filter(i => 
+      (i.sow_number.startsWith(prefix) && i.sow_number.split('.').length === 2) ||
+      (i.scope_l1 === l1.scope_l1)
+    )
   }
   function getL3ForL2(l2: SowItem) {
     const prefix = l2.sow_number + '.'
     return l3.filter(i => {
-      if (!i.sow_number.startsWith(prefix)) return false
+      // Match by SOW number prefix OR by scope L1 + item L2 names for robustness
+      const matchesPrefix = i.sow_number.startsWith(prefix)
+      const matchesNames = i.scope_l1 === l2.scope_l1 && i.item_l2 === l2.item_l2
+      if (!matchesPrefix && !matchesNames) return false
       if (filterStatus !== 'All' && i.status !== filterStatus) return false
       if (filterRisk   !== 'All' && i.risk_level !== filterRisk) return false
       return true

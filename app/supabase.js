@@ -18,6 +18,9 @@ class MockSupabaseClient {
       }
       return { data: { user }, error: null }
     },
+    getSession: async () => {
+      return { data: { session: null }, error: null }
+    },
     signInWithPassword: async ({ email, password }) => {
       const user = {
         id: 'dev-user-id',
@@ -407,6 +410,11 @@ class MockSupabaseClient {
           if (valA > valB) return orderAsc ? 1 : -1
           return 0
         })
+        return queryBuilder
+      },
+      range: (from, to) => {
+        // In mock mode all data is in memory — just slice the filtered array
+        filtered = filtered.slice(from, to + 1)
         return queryBuilder
       },
       update: (payload) => {

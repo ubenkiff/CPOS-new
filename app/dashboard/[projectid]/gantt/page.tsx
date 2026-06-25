@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '../../../supabase'
 import { canAccessProject, PUBLIC_VIEWONLY_PROJECT_ID } from '../../../../lib/access'
+import { fetchAllRows } from '../../../../lib/supabasePaginate'
 import { useTheme } from '../../../../lib/theme'
 import ThemeSelector from '../../../../components/ThemeSelector'
 
@@ -155,7 +156,9 @@ export default function GanttModule() {
 
   async function fetchItems() {
     setLoading(true)
-    const { data } = await supabase.from('sow_items').select('*').eq('projectid', projectid).order('sow_number')
+    const { data } = await fetchAllRows<SowItem>((from, to) =>
+      supabase.from('sow_items').select('*').eq('projectid', projectid).order('sow_number').range(from, to)
+    )
     setAllItems(data || [])
     setLoading(false)
   }

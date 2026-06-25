@@ -435,18 +435,105 @@ export function parseCSVToSow(rows: Record<string, unknown>[], headers: Set<stri
   }
 
   const items: ParsedSowItem[] = []
+  let skippedCount = 0
+  let processedCount = 0
+
+  // Track hierarchy for generating proper SOW numbers
+  const l1Counter = new Map<string, number>()
+  const l2Counter = new Map<string, number>()
+  let l1Index = 0
 
   rows.forEach((r) => {
     const sowNumber = String(pick(r, ['SOW #', 'Serial', 'SOW Number', 'WBS', 'OutlineNumber']) ?? '').trim()
-    if (!sowNumber || sowNumber.toUpperCase() === 'TOTALS') return
+    if (sowNumber.toUpperCase() === 'TOTALS') {
+      skippedCount++
+      return
+    }
 
     const scopeL1 = String(pick(r, ['Scope (L1)', 'Scope', 'L1', 'L1 Scope']) ?? '').trim()
     const itemL2 = String(pick(r, ['Item (L2)', 'Item', 'L2', 'L2 Item']) ?? '').trim()
     const subItemL3 = String(pick(r, ['Sub Item (L3)', 'Sub Item', 'L3', 'L3 Sub Item']) ?? '').trim()
     const particulars = String(pick(r, ['Particulars / Spec', 'Particulars', 'Spec', 'Description']) ?? '').trim()
 
-    const hierarchyParts = sowNumber.split('.').length
-    const level: 1 | 2 | 3 = hierarchyParts >= 3 ? 3 : (hierarchyParts === 2 ? 2 : 1)
+    // Determine hierarchy level from content if SOW number is missing or flat
+    let finalSowNumber = sowNumber
+    let level: 1 | 2 | 3 = 1
+
+    if (!sowNumber) {
+      // Generate hierarchical SOW numbers based on content
+      if (scopeL1 && !itemL2 && !subItemL3) {
+        // L1 item
+        l1Index++
+        finalSowNumber = String(l1Index)
+        level = 1
+        l1Counter.set(finalSowNumber, 0)
+      } else if (scopeL1 && itemL2 && !subItemL3) {
+        // L2 item - need to find parent L1
+        const parentL1 = items.find(i => i.hierarchy_level === 1 && i.scope_l1 === scopeL1)
+        if (parentL1) {
+          const l2Idx = (l1Counter.get(parentL1.sow_number) || 0) + 1
+          l1Counter.set(parentL1.sow_number, l2Idx)
+          finalSowNumber = `${parentL1.sow_number}.${l2Idx}`
+          level = 2
+        } else {
+          // No parent L1 found, create one
+          l1Index++
+          const newL1Num = String(l1Index)
+          l1Counter.set(newL1Num, 0)
+          items.push({
+            sow_number: newL1Num,
+            hierarchy_level: 1,
+            scope_l1: scopeL1,
+            status: 'Not Started'
+          })
+          const l2Idx = 1
+          l1Counter.set(newL1Num, l2Idx)
+          finalSowNumber = `${newL1Num}.${l2Idx}`
+          level = 2
+        }
+      } else if (scopeL1 && itemL2 && subItemL3) {
+        // L3 item - need to find parent L2
+        const parentL1 = items.find(i => i.hierarchy_level === 1 && i.scope_l1 === scopeL1)
+        if (parentL1) {
+          const parentL2 = items.find(i => i.hierarchy_level === 2 && i.scope_l1 === scopeL1 && i.item_l2 === itemL2)
+          if (parentL2) {
+            const l3Idx = (l2Counter.get(parentL2.sow_number) || 0) + 1
+            l2Counter.set(parentL2.sow_number, l3Idx)
+            finalSowNumber = `${parentL2.sow_number}.${l3Idx}`
+            level = 3
+          } else {
+            // No parent L2 found, create one
+            const l2Idx = (l1Counter.get(parentL1.sow_number) || 0) + 1
+            l1Counter.set(parentL1.sow_number, l2Idx)
+            const newL2Num = `${parentL1.sow_number}.${l2Idx}`
+            items.push({
+              sow_number: newL2Num,
+              hierarchy_level: 2,
+              scope_l1: scopeL1,
+              item_l2: itemL2,
+              status: 'Not Started'
+            })
+            const l3Idx = 1
+            l2Counter.set(newL2Num, l3Idx)
+            finalSowNumber = `${newL2Num}.${l3Idx}`
+            level = 3
+          }
+        }
+      }
+    } else {
+      // Has SOW number, determine level from dot notation
+      const hierarchyParts = sowNumber.split('.').length
+      level = hierarchyParts >= 3 ? 3 : (hierarchyParts === 2 ? 2 : 1)
+    }
+
+    // Skip if still no SOW number and no meaningful content
+    if (!finalSowNumber && !scopeL1 && !itemL2 && !subItemL3) {
+      skippedCount++
+      return
+    }
+
+    processedCount++
+    console.log('[Parser Debug] Processing item:', { finalSowNumber, level, scopeL1, itemL2, subItemL3 })
 
     const plStart = parseDate(pick(r, ['Planned Start', 'Start', 'PlannedStart']))
     const plEnd = parseDate(pick(r, ['Planned End', 'Finish', 'PlannedEnd', 'Planned Completion']))
@@ -472,7 +559,7 @@ export function parseCSVToSow(rows: Record<string, unknown>[], headers: Set<stri
     const actualCost = num(pick(r, ['Actual Cost', 'ActualCost']))
 
     items.push({
-      sow_number: sowNumber,
+      sow_number: finalSowNumber,
       hierarchy_level: level,
       scope_l1: scopeL1 || undefined,
       item_l2: itemL2 || undefined,
@@ -508,6 +595,7 @@ export function parseCSVToSow(rows: Record<string, unknown>[], headers: Set<stri
     })
   })
 
+  console.log(`[Parser Debug] Summary: Total rows=${rows.length}, Processed=${processedCount}, Skipped=${skippedCount}, Final items=${items.length}`)
   return items.sort((a, b) => a.sow_number.localeCompare(b.sow_number, undefined, { numeric: true, sensitivity: 'base' }))
 }
 
